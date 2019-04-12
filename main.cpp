@@ -384,6 +384,143 @@ class Sphere: public Geometry
 
 ///////////////////////////////////////////////////////////////////
 //
+// Ray Tracer
+//
+///////////////////////////////////////////////////////////////////
+class RayTracer
+{
+    private:
+        std::vector<std::shared_ptr<Geometry>> _geometries;
+        std::vector<std::shared_ptr<Light>> _lights;
+        Vec3 _ambient_color;
+
+    public:
+        RayTracer(
+            const std::vector<std::shared_ptr<Geometry>>& geometries,
+            const std::vector<std::shared_ptr<Light>>& lights,
+            const Vec3& ambient_color)
+            : _geometries(geometries),
+            _lights(lights),
+            _ambient_color(ambient_color)
+        {}
+
+        int run(Ray& camera_ray, int max_num_bounces)
+        {
+            int num_bounces = 0;
+            while(1)
+            {
+                if(camera_ray.intensity < 1e-4) break;
+                if(num_bounces >= max_num_bounces) break;
+
+                Vec3 interception_point, interception_point_normal;
+                std::shared_ptr<Geometry> intercepted_geometry = nullptr;
+                bool camera_ray_intercepted = this->find_interception_point_with_ray(camera_ray, interception_point, interception_point_normal, intercepted_geometry);
+
+                if(camera_ray_intercepted)
+                {
+                    num_bounces ++;
+                    Vec3 interception_point_color = this->calc_interception_point_color(interception_point, interception_point_normal,  intercepted_geometry);
+
+                    // update camera rate
+                    camera_ray.color += interception_point_color*camera_ray.intensity;
+                    camera_ray.origin = interception_point;
+                    camera_ray.direction = camera_ray.direction-interception_point_normal*(interception_point_normal.dot(camera_ray.direction)*2);
+                    camera_ray.intensity *= (1-intercepted_geometry->roughness());
+                }
+                else // Ray will not meet any geometries and go to infinity.
+                {
+                    if(num_bounces == 0)
+                        camera_ray.color += _ambient_color*camera_ray.intensity;
+                    camera_ray.intensity = 0; // to make the loop break
+                }
+            }
+
+            return num_bounces;
+        }
+
+    private:
+        bool find_interception_point_with_ray(const Ray& ray, Vec3& interception_point, Vec3& interception_point_normal, std::shared_ptr<Geometry>& intercepted_geometry) const
+        {
+            bool has_interception = false;
+            float min_interception_distance = std::numeric_limits<float>::max();
+
+            for(auto geometry: _geometries)
+            {
+                float interception_distance;
+                bool intercepted = geometry->interception_with_ray(ray, interception_distance);
+                if(intercepted && interception_distance > 1e-4)
+                {
+                    if(interception_distance < min_interception_distance)
+                    {
+                        has_interception = true;
+                        min_interception_distance = interception_distance;
+                        intercepted_geometry = geometry;
+                    }
+                }
+            }
+
+            if(has_interception)
+            {
+                interception_point = ray.origin + ray.direction*min_interception_distance;
+
+                interception_point_normal = intercepted_geometry->normal_at(interception_point);
+            }
+
+            return has_interception;
+        }
+
+        bool incident_light_ray_is_blocked(const Ray& incident_light_ray, const Vec3 interception_point, const std::shared_ptr<Geometry>& intercepted_geometry) const
+        {
+            bool light_ray_blocked = false;
+
+            float dist_to_light = interception_point.distance_to(incident_light_ray.origin);
+
+            Ray reverse_incident_light_ray = Ray(interception_point, incident_light_ray.direction.negative());
+
+            for(auto geometry: _geometries)
+            {
+                if(geometry != intercepted_geometry)
+                {
+                    float dist_to_geometry;
+                    bool intercepted = geometry->interception_with_ray(reverse_incident_light_ray, dist_to_geometry);
+
+                    if(intercepted && dist_to_geometry > 0 && dist_to_geometry < dist_to_light)
+                    {
+                        light_ray_blocked = true;
+                        break;
+                    }
+                }
+            }
+
+            return light_ray_blocked;
+        }
+
+        Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry) const
+        {
+            Vec3 interception_point_color = _ambient_color*intercepted_geometry->albedo()*intercepted_geometry->roughness();
+
+            for(auto light: _lights)
+            {
+                Ray incident_light_ray = light->incidence_at(interception_point);
+
+                // Test if the incident light ray is blocked.
+                if(!this->incident_light_ray_is_blocked(incident_light_ray, interception_point, intercepted_geometry))
+                {
+                    float dot = interception_point_normal.dot(incident_light_ray.direction.negative());
+
+                    if(dot > 0)
+                    {
+                        interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->albedo()*intercepted_geometry->roughness()*dot;
+                    }
+                }
+            }
+
+            return interception_point_color;
+        }
+};
+
+///////////////////////////////////////////////////////////////////
+//
 // Tests
 //
 ///////////////////////////////////////////////////////////////////
@@ -416,33 +553,6 @@ void test_Camera()
     std::cout << camera._right.dot(camera._right) << std::endl;
 }
 
-bool find_interception_point_with_ray(const Ray& ray, const std::vector<std::shared_ptr<Geometry>>& geometries, Vec3& interception_point, std::shared_ptr<Geometry>& intercepted_geometry)
-{
-    bool has_interception = false;
-    float min_interception_distance = std::numeric_limits<float>::max();
-
-    for(auto geometry: geometries)
-    {
-        float interception_distance;
-        bool intercepted = geometry->interception_with_ray(ray, interception_distance);
-        if(intercepted && interception_distance > 1e-4)
-        {
-            if(interception_distance < min_interception_distance)
-            {
-                has_interception = true;
-                min_interception_distance = interception_distance;
-                intercepted_geometry = geometry;
-            }
-        }
-    }
-
-    if(has_interception)
-    {
-        interception_point = ray.origin + ray.direction*min_interception_distance;
-    }
-
-    return has_interception;
-}
 
 void test_scene()
 {
@@ -463,82 +573,16 @@ void test_scene()
     geometries.push_back(std::shared_ptr<Geometry>(new Sphere(Vec3(1.8,0,3), 0.8, 0.9, Vec3(0,1,0))));
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
-    int max_num_bounces = 10;
+    RayTracer ray_tracer(geometries, lights, ambient_color);
+    int max_num_bounces = 100;
+    int total_num_bounces = 0;
 
     for(float y = 0; y < H; y++)
     {
         for(float x = 0; x < W; x++)
         {
             Ray camera_ray = camera.cast_ray_from_pixel(x, y);
-
-            int num_bounces = 0;
-            while(1)
-            {
-                if(camera_ray.intensity < 1e-4) break;
-                if(num_bounces >= max_num_bounces) break;
-
-                Vec3 interception_point;
-                std::shared_ptr<Geometry> intercepted_geometry = nullptr;
-                bool camera_ray_intercepted = find_interception_point_with_ray(camera_ray, geometries, interception_point, intercepted_geometry);
-
-                if(camera_ray_intercepted)
-                {
-                    num_bounces ++;
-                    Vec3 interception_point_color = ambient_color*intercepted_geometry->albedo()*intercepted_geometry->roughness();
-
-                    Vec3 normal = intercepted_geometry->normal_at(interception_point);
-
-                    for(auto light: lights)
-                    {
-                        Ray incident_light_ray = light->incidence_at(interception_point);
-
-                        // Test if the incident light ray is blocked.
-                        bool light_ray_blocked = false;
-
-                        {
-                            float dist_to_light = interception_point.distance_to(incident_light_ray.origin);
-
-                            Ray reverse_incident_light_ray = Ray(interception_point, incident_light_ray.direction.negative());
-
-                            for(auto geometry: geometries)
-                            {
-                                if(geometry != intercepted_geometry)
-                                {
-                                    float dist_to_geometry;
-                                    bool intercepted = geometry->interception_with_ray(reverse_incident_light_ray, dist_to_geometry);
-
-                                    if(intercepted && dist_to_geometry > 0 && dist_to_geometry < dist_to_light)
-                                    {
-                                        light_ray_blocked = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if(!light_ray_blocked)
-                        {
-                            float dot = normal.dot(incident_light_ray.direction.negative());
-
-                            if(dot > 0)
-                            {
-                                interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->albedo()*intercepted_geometry->roughness()*dot;
-                            }
-                        }
-                    }
-
-                    camera_ray.color += interception_point_color*camera_ray.intensity;
-                    camera_ray.origin = interception_point;
-                    camera_ray.direction = camera_ray.direction-normal*(normal.dot(camera_ray.direction)*2);
-                    camera_ray.intensity *= (1-intercepted_geometry->roughness());
-                }
-                else // Ray will not meet any geometries and go to infinity.
-                {
-                    if(num_bounces == 0)
-                        camera_ray.color += ambient_color*camera_ray.intensity;
-                    camera_ray.intensity = 0; // to make the loop break
-                }
-            }
+            total_num_bounces += ray_tracer.run(camera_ray, max_num_bounces);
 
             int idx = img.step*int(y) + 3*int(x);
             img.data[idx+0] = std::min(255, int(0.5+255*camera_ray.color.b()));
@@ -546,6 +590,8 @@ void test_scene()
             img.data[idx+2] = std::min(255, int(0.5+255*camera_ray.color.r()));
         }
     }
+
+    std::cout << "Average: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
 
     cv::imwrite("test.jpg", img);
 }
