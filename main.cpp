@@ -88,6 +88,11 @@ class Vec3
             _v[0] += v2._v[0]; _v[1] += v2._v[1]; _v[2] += v2._v[2];
         }
 
+        inline Vec3 operator*=(float s)
+        {
+            _v[0] *= s; _v[1] *= s; _v[2] *= s;
+        }
+
         inline Vec3 operator*(float s)  const
         {
             return Vec3(_v[0]*s, _v[1]*s, _v[2]*s);
@@ -123,7 +128,16 @@ Vec3 max(const Vec3& v1, const Vec3& v2)
 
 float random_uniform(float min = 0, float max = 1)
 {
-    return min + (float(random())/RAND_MAX)/(max-min);
+    return min + (float(random())/RAND_MAX)*(max-min);
+}
+
+Vec3 random_in_unit_sphere()
+{
+    Vec3 v;
+    do {
+        v = Vec3(random_uniform(-1,1), random_uniform(-1,1), random_uniform(-1,1));
+    } while(v.sqr() > 1.0);
+    return v;
 }
 
 std::ostream& operator << (std::ostream& out, const Vec3& v)
@@ -424,8 +438,15 @@ class RayTracer
                     // update camera rate
                     camera_ray.color += interception_point_color*camera_ray.intensity;
                     camera_ray.origin = interception_point;
-                    camera_ray.direction = camera_ray.direction-interception_point_normal*(interception_point_normal.dot(camera_ray.direction)*2);
-                    camera_ray.intensity *= (1-intercepted_geometry->roughness());
+                    // Vec3 perturbed_normal = (interception_point_normal+random_in_unit_sphere()*0.5).normalized();
+                    // camera_ray.direction = camera_ray.direction-perturbed_normal*(perturbed_normal.dot(camera_ray.direction)*2);
+
+                    camera_ray.direction = (camera_ray.direction-interception_point_normal*(interception_point_normal.dot(camera_ray.direction)*2)).normalized();
+                    camera_ray.direction = (camera_ray.direction+random_in_unit_sphere()*0.3).normalized();
+                    if(camera_ray.direction.dot(interception_point_normal) > 0)
+                        camera_ray.intensity *= (1-intercepted_geometry->roughness());
+                    else
+                        camera_ray.intensity = 0;
                 }
                 else // Ray will not meet any geometries and go to infinity.
                 {
@@ -553,10 +574,30 @@ void test_Camera()
     std::cout << camera._right.dot(camera._right) << std::endl;
 }
 
+std::vector<Vec3> get_antialiasing_samples(int num_samples, bool even = false)
+{
+    std::vector<Vec3> samples;
+    const float eps = 1e-4;
+
+    if(even) {
+        int N = int(sqrt(num_samples));
+        float delta = (1-eps)/N;
+        for(float x = 0; x < 1; x+=delta)
+            for(float y = 0; y < 1; y+=delta)
+                samples.push_back(Vec3(x, y, 0));
+    } else {
+        for(int i = 0; i < num_samples; i++)
+            samples.push_back(Vec3(
+                random_uniform(), random_uniform(), 0
+            ));
+    }
+
+    return samples;
+}
 
 void test_scene()
 {
-    size_t W = 3000, H = 1200;
+    size_t W = 300, H = 120;
     cv::Mat img(H, W, CV_8UC3);
 
     Camera camera(Vec3(0,0.3,0), Vec3(0,0,1), Vec3(0,1,0), 1, 80, W, H, true);
@@ -574,26 +615,33 @@ void test_scene()
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
     RayTracer ray_tracer(geometries, lights, ambient_color);
-    int max_num_bounces = 100;
+    const int max_num_bounces = 2;
     int total_num_bounces = 0;
+    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(1000);
 
     for(float y = 0; y < H; y++)
     {
         for(float x = 0; x < W; x++)
         {
-            Ray camera_ray = camera.cast_ray_from_pixel(x, y);
-            total_num_bounces += ray_tracer.run(camera_ray, max_num_bounces);
+            Vec3 color(0,0,0);
+            for(auto aa_sample: antianliasing_samples)
+            {
+                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
+                total_num_bounces += ray_tracer.run(camera_ray, max_num_bounces);
+                color += camera_ray.color;
+            }
+            color *= 1.0f/(antianliasing_samples.size());
 
             int idx = img.step*int(y) + 3*int(x);
-            img.data[idx+0] = std::min(255, int(0.5+255*camera_ray.color.b()));
-            img.data[idx+1] = std::min(255, int(0.5+255*camera_ray.color.g()));
-            img.data[idx+2] = std::min(255, int(0.5+255*camera_ray.color.r()));
+            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
+            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
+            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
         }
     }
 
     std::cout << "Average: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
 
-    cv::imwrite("test.jpg", img);
+    cv::imwrite("test.png", img);
 }
 ///////////////////////////////////////////////////////////////////
 //
