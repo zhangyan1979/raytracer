@@ -224,7 +224,8 @@ class Camera
         {
             if(_is_perspective)
             {
-                return Ray(this->_focal_point, (_right*x + _down*y + _origin - _focal_point).normalized(), Vec3(0,0,0), 1);
+                Vec3 point_on_the_plane_co = _right*x + _down*y + _origin;
+                return Ray(point_on_the_plane_co, (point_on_the_plane_co - _focal_point).normalized(), Vec3(0,0,0), 1);
             }
             else
             {
@@ -635,7 +636,7 @@ void test_scene()
     RayTracer ray_tracer(geometries, lights, ambient_color);
     const int max_num_bounces = 20;
     int total_num_bounces = 0;
-    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(1000);
+    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(10);
 
     for(float y = 0; y < H; y++)
     {
