@@ -4,6 +4,7 @@
 #include <vector>
 #include <math.h>
 #include <iostream>
+#include <iomanip>
 #include <memory>
 #include <assert.h>
 
@@ -297,14 +298,16 @@ class Geometry
 {
     private:
         float _roughness;
+        float _specularity;
         Vec3 _albedo;
 
     public:
-        Geometry(float roughness, const Vec3& albedo)
-        : _roughness(roughness), _albedo(albedo)
+        Geometry(float roughness, float specularity, const Vec3& albedo)
+        : _roughness(roughness), _specularity(specularity), _albedo(albedo)
         {}
 
         inline float roughness() const { return _roughness; }
+        inline float specularity() const { return _specularity; }
         inline Vec3 albedo() const { return _albedo; }
 
         virtual Vec3 normal_at(const Vec3& point) const = 0;
@@ -322,8 +325,8 @@ class InfinitePlane: public Geometry
         float _distance;
         Vec3 _normal;
     public:
-        InfinitePlane(float distance, const Vec3& normal, float roughness, const Vec3& albedo)
-        : Geometry(roughness, albedo),
+        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const Vec3& albedo)
+        : Geometry(roughness, specularity, albedo),
         _distance(distance), _normal(normal.normalized())
         {};
 
@@ -353,8 +356,8 @@ class Sphere: public Geometry
         float _radius;
 
     public:
-        Sphere(const Vec3& center, float radius, float roughness, const Vec3& albedo)
-        : Geometry(roughness, albedo), _center(center), _radius(radius)
+        Sphere(const Vec3& center, float radius, float roughness, float specularity, const Vec3& albedo)
+        : Geometry(roughness, specularity, albedo), _center(center), _radius(radius)
         {}
 
         Vec3 normal_at(const Vec3& point) const
@@ -438,15 +441,12 @@ class RayTracer
                     // update camera rate
                     camera_ray.color += interception_point_color*camera_ray.intensity;
                     camera_ray.origin = interception_point;
-                    // Vec3 perturbed_normal = (interception_point_normal+random_in_unit_sphere()*0.5).normalized();
-                    // camera_ray.direction = camera_ray.direction-perturbed_normal*(perturbed_normal.dot(camera_ray.direction)*2);
 
-                    camera_ray.direction = (camera_ray.direction-interception_point_normal*(interception_point_normal.dot(camera_ray.direction)*2)).normalized();
-                    camera_ray.direction = (camera_ray.direction+random_in_unit_sphere()*0.3).normalized();
-                    if(camera_ray.direction.dot(interception_point_normal) > 0)
-                        camera_ray.intensity *= (1-intercepted_geometry->roughness());
-                    else
-                        camera_ray.intensity = 0;
+                    Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
+                    camera_ray.direction = reflection_dir;
+                    if(interception_point_normal.dot(reflection_dir) > 0)
+                        camera_ray.intensity *= 1-intercepted_geometry->roughness();
+                    else camera_ray.intensity = 0;
                 }
                 else // Ray will not meet any geometries and go to infinity.
                 {
@@ -538,6 +538,23 @@ class RayTracer
 
             return interception_point_color;
         }
+
+        Vec3 get_reflection_dir(const Vec3& incident_dir, const Vec3& normal, float specularity, bool perturb_normal = true)
+        {
+            Vec3 reflection_dir;
+
+            if(perturb_normal) // perturb reflection through perturbing normal
+            {
+                Vec3 perturbed_normal = (normal + random_in_unit_sphere()*(1-specularity)).normalized();
+                reflection_dir = incident_dir - perturbed_normal*(perturbed_normal.dot(incident_dir)*2);
+            }
+            else // pertube reflection directly
+            {
+                Vec3 idea_reflection_dir = incident_dir - normal*(incident_dir.dot(normal)*2);
+                reflection_dir = (idea_reflection_dir + random_in_unit_sphere()*(1-specularity)).normalized();
+            }
+            return reflection_dir;
+        }
 };
 
 ///////////////////////////////////////////////////////////////////
@@ -597,7 +614,8 @@ std::vector<Vec3> get_antialiasing_samples(int num_samples, bool even = false)
 
 void test_scene()
 {
-    size_t W = 300, H = 120;
+    int S = 10;
+    size_t W = 30*S, H = 12*S;
     cv::Mat img(H, W, CV_8UC3);
 
     Camera camera(Vec3(0,0.3,0), Vec3(0,0,1), Vec3(0,1,0), 1, 80, W, H, true);
@@ -608,14 +626,14 @@ void test_scene()
 
 
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(1, Vec3(0,-1,0), 1, Vec3(0,0,1))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(Vec3(0,0,3), 0.8, 0.5, Vec3(1,0,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(Vec3(-1.8,0,3), 0.8, 0.2, Vec3(1,1,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(Vec3(1.8,0,3), 0.8, 0.9, Vec3(0,1,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*albedo*/ Vec3(0,0,1))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 0.8, /*roughness*/ 0.2, /*specularity*/ 0.9, /*albedo*/ Vec3(1,0,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(-1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(1,1,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,1,0))));
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
     RayTracer ray_tracer(geometries, lights, ambient_color);
-    const int max_num_bounces = 2;
+    const int max_num_bounces = 20;
     int total_num_bounces = 0;
     std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(1000);
 
@@ -637,9 +655,12 @@ void test_scene()
             img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
             img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
         }
+
+        std::cout << "\r" << std::round(float(y+1)/H*100) << "%" << " completed.";
+        std::cout.flush();
     }
 
-    std::cout << "Average: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
+    std::cout << "\nAverage: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
 
     cv::imwrite("test.png", img);
 }
