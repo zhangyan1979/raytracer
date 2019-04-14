@@ -366,6 +366,11 @@ class Sphere: public Geometry
             return (point-_center).normalized();
         }
 
+        bool has_interception_with_sphere(const Sphere& another_sphere) const
+        {
+            return _center.distance_to(another_sphere._center) <= (_radius + another_sphere._radius);
+        }
+
         bool interception_with_ray(const Ray& ray, float& interception_distance) const
         {
             Vec3 t = ray.origin - _center;
@@ -665,6 +670,97 @@ void test_scene()
 
     cv::imwrite("test.png", img);
 }
+
+bool spheres_have_interceptions(const std::shared_ptr<Sphere>& test_sphere, const std::vector<std::shared_ptr<Geometry>>& geometries)
+{
+    for(auto geometry: geometries)
+    {
+        Sphere* another_sphere = dynamic_cast<Sphere*>(geometry.get());
+        if(another_sphere != nullptr)
+            if(test_sphere->has_interception_with_sphere(*another_sphere))
+                return true;
+    }
+
+    return false;
+}
+
+void test_scene2()
+{
+    int S = 40;
+    size_t W = 30*S, H = 20*S;
+    cv::Mat img(H, W, CV_8UC3);
+
+    Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
+    std::vector<std::shared_ptr<Light>> lights;
+    lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
+    lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
+
+    std::vector<std::shared_ptr<Geometry>> geometries;
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*albedo*/ Vec3(0.5,0.5,0.8))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(0.6,0.6,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.2, /*specularity*/ 1, /*albedo*/ Vec3(0.6,0,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,0.6,0))));
+
+    int num_small_balls = 400;
+    float small_ball_radius = 0.25;
+    float distribute_range = 12;
+    for(int i = 0; i < num_small_balls;) {
+        std::shared_ptr<Sphere> small_ball(new Sphere(
+            /*center*/ Vec3(
+                random_uniform(-distribute_range, distribute_range),
+                1-small_ball_radius,
+                random_uniform(-distribute_range, distribute_range)),
+            /*radius*/ small_ball_radius,
+            /*roughness*/ 0.9,
+            /*specularity*/ 0,
+            /*albedo*/ Vec3(
+                random_uniform()*random_uniform(),
+                random_uniform()*random_uniform(),
+                random_uniform()*random_uniform()
+                )
+        ));
+
+        if(!spheres_have_interceptions(small_ball, geometries))
+        {
+            geometries.push_back(small_ball);
+            i++;
+        }
+    }
+
+    Vec3 ambient_color(0.2, 0.2, 0.2);
+    RayTracer ray_tracer(geometries, lights, ambient_color);
+    const int max_num_bounces = 20;
+    int total_num_bounces = 0;
+    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(100);
+
+    for(float y = 0; y < H; y++)
+    {
+        for(float x = 0; x < W; x++)
+        {
+            Vec3 color(0,0,0);
+            for(auto aa_sample: antianliasing_samples)
+            {
+                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
+                total_num_bounces += ray_tracer.run(camera_ray, max_num_bounces);
+                color += camera_ray.color;
+            }
+            color *= 1.0f/(antianliasing_samples.size());
+
+            int idx = img.step*int(y) + 3*int(x);
+            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
+            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
+            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
+        }
+
+        std::cout << "\r" << std::round(float(y+1)/H*100) << "%" << " completed.";
+        std::cout.flush();
+    }
+
+    std::cout << "\nAverage: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
+
+    cv::imwrite("test.png", img);
+}
 ///////////////////////////////////////////////////////////////////
 //
 // main()
@@ -674,6 +770,6 @@ int main()
 {
     // test_Vec3();
     // test_Camera();
-    test_scene();
+    test_scene2();
     return 0;
 }
