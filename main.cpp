@@ -3,10 +3,12 @@
 #include <string>
 #include <vector>
 #include <math.h>
+#include <chrono>
 #include <iostream>
 #include <iomanip>
 #include <memory>
 #include <assert.h>
+#include <thread>
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -41,6 +43,12 @@ class Vec3
         inline float r() const { return _v[0]; }
         inline float g() const { return _v[1]; }
         inline float b() const { return _v[2]; }
+
+        inline const float operator[](int i) const
+        {
+            // for efficiency, no boundary check.
+            return _v[i];
+        }
 
 
         inline float sqr() const
@@ -290,6 +298,56 @@ class SpotLight: public Light
         }
 };
 
+
+///////////////////////////////////////////////////////////////////
+//
+// BoundingBox
+//
+///////////////////////////////////////////////////////////////////
+class BoundingBox
+{
+    private:
+        Vec3 _min_corner;
+        Vec3 _max_corner;
+    public:
+        BoundingBox(): _min_corner(0,0,0), _max_corner(0,0,0) {};
+        BoundingBox(const Vec3& min_corner, const Vec3& max_corner)
+        : _min_corner(min_corner), _max_corner(max_corner)
+        {}
+
+        void setMinCorner(const Vec3& min)
+        {
+            _min_corner = min;
+        }
+
+        void setMaxCorner(const Vec3& max)
+        {
+            _max_corner = max;
+        }
+
+        bool is_valid() const
+        {
+            return (_max_corner.x() > _min_corner.x()) && (_max_corner.y() > _min_corner.y()) && (_max_corner.z() > _min_corner.z());
+        }
+
+        bool hit_by_ray(const Ray& ray) const
+        {
+            float tmax = std::numeric_limits<float>::max();
+            float tmin = std::numeric_limits<float>::min();
+            for(int i = 0; i < 3; i++)
+            {
+                float invD = 1.0f/ray.direction[i];
+                float t0 = (_min_corner[i]-ray.origin[i])*invD;
+                float t1 = (_max_corner[i]-ray.origin[i])*invD;
+                if(invD < 0) std::swap(t0, t1);
+                tmin = t0 > tmin ? t0 : tmin;
+                tmax = t1 < tmax ? t1 : tmax;
+                if (tmax <= tmin) return false;
+            }
+            return true;
+        }
+};
+
 ///////////////////////////////////////////////////////////////////
 //
 // Geometry
@@ -297,10 +355,22 @@ class SpotLight: public Light
 ///////////////////////////////////////////////////////////////////
 class Geometry
 {
-    private:
+    protected:
         float _roughness;
         float _specularity;
         Vec3 _albedo;
+        BoundingBox _bounding_box;
+
+    private:
+        bool bounding_box_hit_by_ray(const Ray& ray)
+        {
+            if(!_bounding_box.is_valid())
+                return true;
+            else
+                return _bounding_box.hit_by_ray(ray);
+        }
+
+        virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const = 0;
 
     public:
         Geometry(float roughness, float specularity, const Vec3& albedo)
@@ -310,9 +380,18 @@ class Geometry
         inline float roughness() const { return _roughness; }
         inline float specularity() const { return _specularity; }
         inline Vec3 albedo() const { return _albedo; }
+        inline const BoundingBox& bounding_box() const { return _bounding_box; }
 
         virtual Vec3 normal_at(const Vec3& point) const = 0;
-        virtual bool interception_with_ray(const Ray& ray, float& interception_distance) const = 0;
+
+        virtual bool interception_with_ray(const Ray& ray, float& interception_distance)
+        {
+            if(bounding_box_hit_by_ray(ray))
+            {
+                return geometry_hit_by_ray(ray, interception_distance);
+            }
+            return false;
+        }
 };
 
 inline float abs(float v)
@@ -325,6 +404,7 @@ class InfinitePlane: public Geometry
     private:
         float _distance;
         Vec3 _normal;
+
     public:
         InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const Vec3& albedo)
         : Geometry(roughness, specularity, albedo),
@@ -336,7 +416,8 @@ class InfinitePlane: public Geometry
             return _normal;
         }
 
-        bool interception_with_ray(const Ray& ray, float& interception_distance) const
+    private:
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
         {
             float discriminant = _normal.dot(ray.direction);
             if(abs(discriminant) > 1e-3)
@@ -359,7 +440,10 @@ class Sphere: public Geometry
     public:
         Sphere(const Vec3& center, float radius, float roughness, float specularity, const Vec3& albedo)
         : Geometry(roughness, specularity, albedo), _center(center), _radius(radius)
-        {}
+        {
+            _bounding_box.setMinCorner(_center-Vec3(radius, radius, radius));
+            _bounding_box.setMaxCorner(_center+Vec3(radius, radius, radius));
+        }
 
         Vec3 normal_at(const Vec3& point) const
         {
@@ -371,7 +455,8 @@ class Sphere: public Geometry
             return _center.distance_to(another_sphere._center) <= (_radius + another_sphere._radius);
         }
 
-        bool interception_with_ray(const Ray& ray, float& interception_distance) const
+    private:
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
         {
             Vec3 t = ray.origin - _center;
             float a = ray.direction.sqr();
@@ -686,7 +771,9 @@ bool spheres_have_interceptions(const std::shared_ptr<Sphere>& test_sphere, cons
 
 void test_scene2()
 {
-    int S = 40;
+    int num_samples = 10;
+    int num_threads = 7;
+    int S = 15;
     size_t W = 30*S, H = 20*S;
     cv::Mat img(H, W, CV_8UC3);
 
@@ -715,9 +802,9 @@ void test_scene2()
             /*roughness*/ 0.9,
             /*specularity*/ 0,
             /*albedo*/ Vec3(
-                random_uniform()*random_uniform(),
-                random_uniform()*random_uniform(),
-                random_uniform()*random_uniform()
+                random_uniform(),
+                random_uniform(),
+                random_uniform()
                 )
         ));
 
@@ -729,35 +816,52 @@ void test_scene2()
     }
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
-    RayTracer ray_tracer(geometries, lights, ambient_color);
+    // RayTracer ray_tracer(geometries, lights, ambient_color);
     const int max_num_bounces = 20;
-    int total_num_bounces = 0;
-    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(100);
+    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(num_samples);
 
-    for(float y = 0; y < H; y++)
+    std::vector<std::thread> threads;
+    for(int i = 0; i < num_threads; i++)
     {
-        for(float x = 0; x < W; x++)
-        {
-            Vec3 color(0,0,0);
-            for(auto aa_sample: antianliasing_samples)
+        threads.push_back(std::thread(
+            [i, num_threads, H, W, camera, geometries, lights, ambient_color, antianliasing_samples, img]
             {
-                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
-                total_num_bounces += ray_tracer.run(camera_ray, max_num_bounces);
-                color += camera_ray.color;
+                    RayTracer ray_tracer(geometries, lights, ambient_color);
+
+                    int start_H  = int(float(H)/num_threads*i);
+                    int end_H = int(float(H)/num_threads*(i+1));
+
+                    for(float y = start_H; y < end_H; y++)
+                    {
+                        for(float x = 0; x < W; x++)
+                        {
+                            Vec3 color(0,0,0);
+                            for(auto aa_sample: antianliasing_samples)
+                            {
+                                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
+                                ray_tracer.run(camera_ray, max_num_bounces);
+                                color += camera_ray.color;
+                            }
+                            color *= 1.0f/(antianliasing_samples.size());
+
+                            int idx = img.step*int(y) + 3*int(x);
+                            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
+                            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
+                            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
+                        }
+
+                        if(i == 0)
+                        {
+                            std::cout << "\r" << std::round(float(y+1)/(end_H-start_H)*100) << "%" << " completed.";
+                            std::cout.flush();
+                        }
+                    }
             }
-            color *= 1.0f/(antianliasing_samples.size());
-
-            int idx = img.step*int(y) + 3*int(x);
-            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
-            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
-            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
-        }
-
-        std::cout << "\r" << std::round(float(y+1)/H*100) << "%" << " completed.";
-        std::cout.flush();
+        ));
     }
 
-    std::cout << "\nAverage: " << float(total_num_bounces)/(W*H) << " bounces/pixel." << std::endl;
+    for(auto& thread: threads)
+        thread.join();
 
     cv::imwrite("test.png", img);
 }
@@ -770,6 +874,9 @@ int main()
 {
     // test_Vec3();
     // test_Camera();
+    auto t_start = std::chrono::high_resolution_clock::now();
     test_scene2();
+    auto t_end = std::chrono::high_resolution_clock::now();
+    std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
 }
