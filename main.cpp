@@ -362,6 +362,7 @@ class Geometry
         float _specularity;
         Vec3 _albedo;
         BoundingBox _bounding_box;
+        bool _is_emitter;
 
     private:
         bool bounding_box_hit_by_ray(const Ray& ray)
@@ -375,10 +376,11 @@ class Geometry
         virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const = 0;
 
     public:
-        Geometry(float roughness, float specularity, const Vec3& albedo)
-        : _roughness(roughness), _specularity(specularity), _albedo(albedo)
+        Geometry(float roughness, float specularity, const Vec3& albedo, bool is_emitter)
+        : _roughness(roughness), _specularity(specularity), _albedo(albedo), _is_emitter(is_emitter)
         {}
 
+        inline bool is_emitter() const { return _is_emitter; }
         inline float roughness() const { return _roughness; }
         inline float specularity() const { return _specularity; }
         inline Vec3 albedo() const { return _albedo; }
@@ -408,8 +410,8 @@ class InfinitePlane: public Geometry
         Vec3 _normal;
 
     public:
-        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const Vec3& albedo)
-        : Geometry(roughness, specularity, albedo),
+        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false)
+        : Geometry(roughness, specularity, albedo, is_emitter),
         _distance(distance), _normal(normal.normalized())
         {};
 
@@ -440,8 +442,8 @@ class Sphere: public Geometry
         float _radius;
 
     public:
-        Sphere(const Vec3& center, float radius, float roughness, float specularity, const Vec3& albedo)
-        : Geometry(roughness, specularity, albedo), _center(center), _radius(radius)
+        Sphere(const Vec3& center, float radius, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false)
+        : Geometry(roughness, specularity, albedo, is_emitter), _center(center), _radius(radius)
         {
             _bounding_box.setMinCorner(_center-Vec3(radius, radius, radius));
             _bounding_box.setMaxCorner(_center+Vec3(radius, radius, radius));
@@ -531,15 +533,22 @@ class RayTracer
                     num_bounces ++;
                     Vec3 interception_point_color = this->calc_interception_point_color(interception_point, interception_point_normal,  intercepted_geometry);
 
-                    // update camera rate
+                    // update camera ray
                     camera_ray.color += interception_point_color*camera_ray.intensity;
-                    camera_ray.origin = interception_point;
 
-                    Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
-                    camera_ray.direction = reflection_dir;
-                    if(interception_point_normal.dot(reflection_dir) > 0)
-                        camera_ray.intensity *= 1-intercepted_geometry->roughness();
-                    else camera_ray.intensity = 0;
+                    if(intercepted_geometry->is_emitter())
+                    {
+                        camera_ray.intensity = 0;
+                    }
+                    else
+                    {
+                        camera_ray.origin = interception_point;
+                        Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
+                        camera_ray.direction = reflection_dir;
+                        if(interception_point_normal.dot(reflection_dir) > 0)
+                            camera_ray.intensity *= 1-intercepted_geometry->roughness();
+                        else camera_ray.intensity = 0;
+                    }
                 }
                 else // Ray will not meet any geometries and go to infinity.
                 {
@@ -611,20 +620,28 @@ class RayTracer
 
         Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry) const
         {
-            Vec3 interception_point_color = _ambient_color*intercepted_geometry->albedo()*intercepted_geometry->roughness();
-
-            for(auto light: _lights)
+            Vec3 interception_point_color;
+            if(intercepted_geometry->is_emitter())
             {
-                Ray incident_light_ray = light->incidence_at(interception_point);
+                interception_point_color = intercepted_geometry->albedo();
+            }
+            else
+            {
+                interception_point_color = _ambient_color*intercepted_geometry->albedo()*intercepted_geometry->roughness();
 
-                // Test if the incident light ray is blocked.
-                if(!this->incident_light_ray_is_blocked(incident_light_ray, interception_point, intercepted_geometry))
+                for(auto light: _lights)
                 {
-                    float dot = interception_point_normal.dot(incident_light_ray.direction.negative());
+                    Ray incident_light_ray = light->incidence_at(interception_point);
 
-                    if(dot > 0)
+                    // Test if the incident light ray is blocked.
+                    if(!this->incident_light_ray_is_blocked(incident_light_ray, interception_point, intercepted_geometry))
                     {
-                        interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->albedo()*intercepted_geometry->roughness()*dot;
+                        float dot = interception_point_normal.dot(incident_light_ray.direction.negative());
+
+                        if(dot > 0)
+                        {
+                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->albedo()*intercepted_geometry->roughness()*dot;
+                        }
                     }
                 }
             }
@@ -655,6 +672,35 @@ class RayTracer
 // Tests
 //
 ///////////////////////////////////////////////////////////////////
+struct Parameters
+{
+    int S;
+    int num_samples;
+    int num_threads;
+    int max_num_bounces;
+};
+
+void usage()
+{
+    std::cout << "ray_tracer [S=15] [num_samples=10] [num_threads=8] [max_num_bounces=100]" << std::endl;
+}
+
+Parameters parse_params(int argc, char* argv[])
+{
+    Parameters params = {
+        .S = 15,
+        .num_samples = 10,
+        .num_threads = 8,
+        .max_num_bounces = 100,
+    };
+    if(argc > 1) params.S = atoi(argv[1]);
+    if(argc > 2) params.num_samples = atoi(argv[2]);
+    if(argc > 3) params.num_threads = atoi(argv[3]);
+    if(argc > 4) params.max_num_bounces = atoi(argv[4]);
+
+    return params;
+}
+
 void test_Vec3()
 {
     Vec3 v1(random_uniform(), random_uniform(), random_uniform());
@@ -897,31 +943,32 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
     return img;
 }
 
-void test_scene2()
+void test_scene2(const Parameters& params)
 {
     // parameters
-    int num_samples = 10;
-    int num_threads = 7;
-    int S = 15;
-    size_t W = 30*S, H = 20*S;
-    const int max_num_bounces = 20;
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+
     Vec3 ambient_color(0.2, 0.2, 0.2);
 
     // camera
+    size_t W = 30*S, H = 20*S;
     Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
-    lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
-    lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
-    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
+    // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
+    // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
+    // lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*albedo*/ Vec3(0.5,0.5,0.8))));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.5, /*albedo*/ Vec3(0.5,0.5,0.8), /*is_emitter*/ false)));
     geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(0.6,0.6,0))));
     geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.2, /*specularity*/ 1, /*albedo*/ Vec3(0.6,0,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,0.6,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,0.8,0), /*is_emitter*/ true)));
 
     int num_small_balls = 400;
     float small_ball_radius = 0.25;
@@ -933,13 +980,14 @@ void test_scene2()
                 1-small_ball_radius,
                 random_uniform(-distribute_range, distribute_range)),
             /*radius*/ small_ball_radius,
-            /*roughness*/ 0.9,
-            /*specularity*/ 0,
+            /*roughness*/ random_uniform(0.1, 1),
+            /*specularity*/ random_uniform(0.1, 1),
             /*albedo*/ Vec3(
                 random_uniform(),
                 random_uniform(),
                 random_uniform()
-                )
+                ),
+            /*is_emitter*/ random_uniform() > 0.8
         ));
 
         if(!spheres_have_interceptions(small_ball, geometries))
@@ -959,12 +1007,14 @@ void test_scene2()
 // main()
 //
 ///////////////////////////////////////////////////////////////////
-int main()
+int main(int argc, char* argv[])
 {
+    Parameters params = parse_params(argc, argv);
+
     // test_Vec3();
     // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene2();
+    test_scene2(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
