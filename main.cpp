@@ -2,6 +2,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <string>
 #include <vector>
+#include <list>
 #include <math.h>
 #include <chrono>
 #include <iostream>
@@ -9,6 +10,7 @@
 #include <memory>
 #include <assert.h>
 #include <thread>
+#include <mutex>
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -783,7 +785,7 @@ cv::Mat generate_image(int H, int W, int num_threads, int max_num_bounces, int n
     for(int i = 0; i < num_threads; i++)
     {
         threads.push_back(std::thread(
-            [i, num_threads, H, W, max_num_bounces, camera, geometries, lights, ambient_color, antialiasing_samples, img]
+            [i, num_threads, H, W, max_num_bounces, &camera, &geometries, &lights, &ambient_color, &antialiasing_samples, &img]
             {
                     RayTracer ray_tracer(geometries, lights, ambient_color);
 
@@ -815,6 +817,76 @@ cv::Mat generate_image(int H, int W, int num_threads, int max_num_bounces, int n
                             std::cout.flush();
                         }
                     }
+            }
+        ));
+    }
+
+    for(auto& thread: threads)
+        thread.join();
+
+    return img;
+}
+
+cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int num_samples,
+    const Camera& camera,
+    const std::vector<std::shared_ptr<Geometry>>& geometries,
+    const std::vector<std::shared_ptr<Light>>& lights,
+    const Vec3& ambient_color)
+{
+    cv::Mat img(H, W, CV_8UC3);
+    std::vector<std::thread> threads;
+
+    std::vector<Vec3> antialiasing_samples = get_antialiasing_samples(num_samples);
+
+    std::list<Vec3> pixel_coords;
+    for(int y = 0; y < H; y++)
+        for(int x = 0; x < W; x++)
+            pixel_coords.push_back(Vec3(x, y, 0));
+    const int total_pixels = H*W;
+
+    std::mutex pop_pixel_mutex;
+    for(int i = 0; i < num_threads; i++)
+    {
+        threads.push_back(std::thread(
+            [i, num_threads, max_num_bounces, total_pixels, &camera, &geometries, &lights, &ambient_color, &antialiasing_samples, &img, &pixel_coords, &pop_pixel_mutex]()
+            {
+                RayTracer ray_tracer(geometries, lights, ambient_color);
+
+                while(1)
+                {
+                    pop_pixel_mutex.lock();
+                    int pixels_left = pixel_coords.size();
+                    if(pixels_left <= 0) {
+                        pop_pixel_mutex.unlock();
+                        break;
+                    }
+                    Vec3 pixel_coord = pixel_coords.front();
+                    pixel_coords.pop_front();
+                    pop_pixel_mutex.unlock();
+
+                    float x = pixel_coord.x();
+                    float y = pixel_coord.y();
+
+                    Vec3 color(0,0,0);
+                    for(auto aa_sample: antialiasing_samples)
+                    {
+                        Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
+                        ray_tracer.run(camera_ray, max_num_bounces);
+                        color += camera_ray.color;
+                    }
+                    color *= 1.0f/(antialiasing_samples.size());
+
+                    int idx = img.step*int(y) + 3*int(x);
+                    img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
+                    img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
+                    img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
+
+                    if(i == 0)
+                    {
+                        std::cout << "\r" << std::round(float(total_pixels - pixels_left)/total_pixels*100) << "%" << " completed.";
+                        std::cout.flush();
+                    }
+                }
             }
         ));
     }
@@ -878,7 +950,7 @@ void test_scene2()
     }
 
     // generate image using ray tracing
-    cv::Mat img = generate_image(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
     cv::imwrite("test.png", img);
 }
