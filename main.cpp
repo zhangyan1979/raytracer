@@ -769,20 +769,82 @@ bool spheres_have_interceptions(const std::shared_ptr<Sphere>& test_sphere, cons
     return false;
 }
 
+cv::Mat generate_image(int H, int W, int num_threads, int max_num_bounces, int num_samples,
+    const Camera& camera,
+    const std::vector<std::shared_ptr<Geometry>>& geometries,
+    const std::vector<std::shared_ptr<Light>>& lights,
+    const Vec3& ambient_color)
+{
+    cv::Mat img(H, W, CV_8UC3);
+    std::vector<std::thread> threads;
+
+    std::vector<Vec3> antialiasing_samples = get_antialiasing_samples(num_samples);
+
+    for(int i = 0; i < num_threads; i++)
+    {
+        threads.push_back(std::thread(
+            [i, num_threads, H, W, max_num_bounces, camera, geometries, lights, ambient_color, antialiasing_samples, img]
+            {
+                    RayTracer ray_tracer(geometries, lights, ambient_color);
+
+                    int start_H  = int(float(H)/num_threads*i);
+                    int end_H = int(float(H)/num_threads*(i+1));
+
+                    for(float y = start_H; y < end_H; y++)
+                    {
+                        for(float x = 0; x < W; x++)
+                        {
+                            Vec3 color(0,0,0);
+                            for(auto aa_sample: antialiasing_samples)
+                            {
+                                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
+                                ray_tracer.run(camera_ray, max_num_bounces);
+                                color += camera_ray.color;
+                            }
+                            color *= 1.0f/(antialiasing_samples.size());
+
+                            int idx = img.step*int(y) + 3*int(x);
+                            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
+                            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
+                            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
+                        }
+
+                        if(i == 0)
+                        {
+                            std::cout << "\r" << std::round(float(y+1)/(end_H-start_H)*100) << "%" << " completed.";
+                            std::cout.flush();
+                        }
+                    }
+            }
+        ));
+    }
+
+    for(auto& thread: threads)
+        thread.join();
+
+    return img;
+}
+
 void test_scene2()
 {
+    // parameters
     int num_samples = 10;
     int num_threads = 7;
     int S = 15;
     size_t W = 30*S, H = 20*S;
-    cv::Mat img(H, W, CV_8UC3);
+    const int max_num_bounces = 20;
+    Vec3 ambient_color(0.2, 0.2, 0.2);
 
+    // camera
     Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
+
+    // lights
     std::vector<std::shared_ptr<Light>> lights;
     lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
     lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
     lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
 
+    // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*albedo*/ Vec3(0.5,0.5,0.8))));
     geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(0.6,0.6,0))));
@@ -815,53 +877,8 @@ void test_scene2()
         }
     }
 
-    Vec3 ambient_color(0.2, 0.2, 0.2);
-    // RayTracer ray_tracer(geometries, lights, ambient_color);
-    const int max_num_bounces = 20;
-    std::vector<Vec3> antianliasing_samples = get_antialiasing_samples(num_samples);
-
-    std::vector<std::thread> threads;
-    for(int i = 0; i < num_threads; i++)
-    {
-        threads.push_back(std::thread(
-            [i, num_threads, H, W, camera, geometries, lights, ambient_color, antianliasing_samples, img]
-            {
-                    RayTracer ray_tracer(geometries, lights, ambient_color);
-
-                    int start_H  = int(float(H)/num_threads*i);
-                    int end_H = int(float(H)/num_threads*(i+1));
-
-                    for(float y = start_H; y < end_H; y++)
-                    {
-                        for(float x = 0; x < W; x++)
-                        {
-                            Vec3 color(0,0,0);
-                            for(auto aa_sample: antianliasing_samples)
-                            {
-                                Ray camera_ray = camera.cast_ray_from_pixel(x+aa_sample.x(), y+aa_sample.y());
-                                ray_tracer.run(camera_ray, max_num_bounces);
-                                color += camera_ray.color;
-                            }
-                            color *= 1.0f/(antianliasing_samples.size());
-
-                            int idx = img.step*int(y) + 3*int(x);
-                            img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
-                            img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
-                            img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
-                        }
-
-                        if(i == 0)
-                        {
-                            std::cout << "\r" << std::round(float(y+1)/(end_H-start_H)*100) << "%" << " completed.";
-                            std::cout.flush();
-                        }
-                    }
-            }
-        ));
-    }
-
-    for(auto& thread: threads)
-        thread.join();
+    // generate image using ray tracing
+    cv::Mat img = generate_image(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
     cv::imwrite("test.png", img);
 }
