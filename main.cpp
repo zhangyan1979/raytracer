@@ -399,6 +399,30 @@ class BoundingBox
 
 ///////////////////////////////////////////////////////////////////
 //
+// Texture
+//
+///////////////////////////////////////////////////////////////////
+class Texture
+{
+    public:
+        virtual Vec3 value(const Vec3& co) const = 0;
+};
+
+class ConstantTexture : public Texture
+{
+    private:
+        Vec3 _albedo;
+
+    public:
+        ConstantTexture(const Vec3& albedo) : _albedo(albedo) {};
+        Vec3 value(const Vec3& co) const
+        {
+            return _albedo;
+        }
+};
+
+///////////////////////////////////////////////////////////////////
+//
 // Geometry
 //
 ///////////////////////////////////////////////////////////////////
@@ -407,9 +431,10 @@ class Geometry
     protected:
         float _roughness;
         float _specularity;
-        Vec3 _albedo;
+        std::shared_ptr<Texture> _texture;
         BoundingBox _bounding_box;
         bool _is_emitter;
+
 
     private:
         bool bounding_box_hit_by_ray(const Ray& ray)
@@ -423,14 +448,14 @@ class Geometry
         virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const = 0;
 
     public:
-        Geometry(float roughness, float specularity, const Vec3& albedo, bool is_emitter)
-        : _roughness(roughness), _specularity(specularity), _albedo(albedo), _is_emitter(is_emitter)
+        Geometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
+        : _roughness(roughness), _specularity(specularity), _texture(texture), _is_emitter(is_emitter)
         {}
 
         inline bool is_emitter() const { return _is_emitter; }
         inline float roughness() const { return _roughness; }
         inline float specularity() const { return _specularity; }
-        inline Vec3 albedo() const { return _albedo; }
+        inline Vec3 texture_at(const Vec3& co) const { return _texture->value(co); }
         inline const BoundingBox& bounding_box() const { return _bounding_box; }
 
         virtual Vec3 normal_at(const Vec3& point) const = 0;
@@ -452,8 +477,8 @@ class InfinitePlane: public Geometry
         Vec3 _normal;
 
     public:
-        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false)
-        : Geometry(roughness, specularity, albedo, is_emitter),
+        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false)
+        : Geometry(roughness, specularity, texture, is_emitter),
         _distance(distance), _normal(normal.normalized())
         {};
 
@@ -484,8 +509,8 @@ class Sphere: public Geometry
         float _radius;
 
     public:
-        Sphere(const Vec3& center, float radius, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false)
-        : Geometry(roughness, specularity, albedo, is_emitter), _center(center), _radius(radius)
+        Sphere(const Vec3& center, float radius, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false)
+        : Geometry(roughness, specularity, texture, is_emitter), _center(center), _radius(radius)
         {
             _bounding_box.setMinCorner(_center-Vec3(radius, radius, radius));
             _bounding_box.setMaxCorner(_center+Vec3(radius, radius, radius));
@@ -541,8 +566,8 @@ class TransformGeometry: public Geometry
     private:
         Transform _transform;
     public:
-        TransformGeometry(float roughness, float specularity, const Vec3& albedo, bool is_emitter)
-        : Geometry(roughness, specularity, albedo, is_emitter)
+        TransformGeometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
+        : Geometry(roughness, specularity, texture, is_emitter)
         {}
 
         Transform& transform() { return _transform; }
@@ -555,8 +580,8 @@ class Rectangle: public TransformGeometry
         float _half_width;
         float _half_height;
     public:
-        Rectangle(float half_width, float half_height, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false) :
-        TransformGeometry(roughness, specularity, albedo, is_emitter)
+        Rectangle(float half_width, float half_height, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false) :
+        TransformGeometry(roughness, specularity, texture, is_emitter)
         {
             _half_width = half_width;
             _half_height = half_height;
@@ -723,11 +748,11 @@ class RayTracer
             Vec3 interception_point_color;
             if(intercepted_geometry->is_emitter())
             {
-                interception_point_color = intercepted_geometry->albedo();
+                interception_point_color = intercepted_geometry->texture_at(interception_point);
             }
             else
             {
-                interception_point_color = _ambient_color*intercepted_geometry->albedo()*intercepted_geometry->roughness();
+                interception_point_color = _ambient_color*intercepted_geometry->texture_at(interception_point)*intercepted_geometry->roughness();
 
                 for(auto light: _lights)
                 {
@@ -740,7 +765,7 @@ class RayTracer
 
                         if(dot > 0)
                         {
-                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->albedo()*intercepted_geometry->roughness()*dot;
+                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->texture_at(interception_point)*intercepted_geometry->roughness()*dot;
                         }
                     }
                 }
@@ -865,10 +890,10 @@ void test_scene()
 
 
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*albedo*/ Vec3(0,0,1))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 0.8, /*roughness*/ 0.2, /*specularity*/ 0.9, /*albedo*/ Vec3(1,0,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(-1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(1,1,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,1,0))));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 0.8, /*roughness*/ 0.2, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(-1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.1, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,0))))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.9, /*specularity*/ 0.4, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))))));
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
     RayTracer ray_tracer(geometries, lights, ambient_color);
@@ -1065,10 +1090,10 @@ void test_scene2(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.5, /*albedo*/ Vec3(0.5,0.5,0.8), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*albedo*/ Vec3(0.6,0.6,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.2, /*specularity*/ 1, /*albedo*/ Vec3(0.6,0,0))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*albedo*/ Vec3(0,0.8,0), /*is_emitter*/ true)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0.6,0))))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.2, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))), /*is_emitter*/ true)));
 
     int num_small_balls = 400;
     float small_ball_radius = 0.25;
@@ -1082,11 +1107,12 @@ void test_scene2(const Parameters& params)
             /*radius*/ small_ball_radius,
             /*roughness*/ random_uniform(0.1, 1),
             /*specularity*/ random_uniform(0.1, 1),
-            /*albedo*/ Vec3(
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
+                Vec3(
                 random_uniform(),
                 random_uniform(),
                 random_uniform()
-                ),
+                ))),
             /*is_emitter*/ random_uniform() > 0.8
         ));
 
@@ -1121,11 +1147,11 @@ void test_scene3(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*albedo*/ Vec3(0,0,0), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*albedo*/ Vec3(1,0,0), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,0))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.6, /*half_height*/ 0.6, /*roughness*/ 0, /*specularity*/ 1, /*albedo*/ Vec3(1,1,1), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.6, /*half_height*/ 0.6, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ true));
         geometry->transform().x = Vec3(0, 0,1);
         geometry->transform().y = Vec3(0, 1,0);
         geometry->transform().z = Vec3(-1,0,0);
@@ -1150,7 +1176,7 @@ int main(int argc, char* argv[])
     // test_Vec3();
     // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene3(params);
+    test_scene2(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
