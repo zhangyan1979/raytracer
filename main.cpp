@@ -363,6 +363,21 @@ class SpotLight: public Light
 // BoundingBox
 //
 ///////////////////////////////////////////////////////////////////
+bool box_hit_by_ray(const Vec3& min_corner, const Vec3& max_corner, const Vec3& origin, const Vec3& direction, float& tmin, float& tmax)
+{
+    for(int i = 0; i < 3; i++)
+    {
+        float invD = 1.0f/direction[i];
+        float t0 = (min_corner[i]-origin[i])*invD;
+        float t1 = (max_corner[i]-origin[i])*invD;
+        if(invD < 0) std::swap(t0, t1);
+        tmin = t0 > tmin ? t0 : tmin;
+        tmax = t1 < tmax ? t1 : tmax;
+        if (tmax <= tmin) return false;
+    }
+    return true;
+}
+
 class BoundingBox
 {
     private:
@@ -392,18 +407,8 @@ class BoundingBox
         bool hit_by_ray(const Ray& ray) const
         {
             float tmax = std::numeric_limits<float>::max();
-            float tmin = std::numeric_limits<float>::min();
-            for(int i = 0; i < 3; i++)
-            {
-                float invD = 1.0f/ray.direction[i];
-                float t0 = (_min_corner[i]-ray.origin[i])*invD;
-                float t1 = (_max_corner[i]-ray.origin[i])*invD;
-                if(invD < 0) std::swap(t0, t1);
-                tmin = t0 > tmin ? t0 : tmin;
-                tmax = t1 < tmax ? t1 : tmax;
-                if (tmax <= tmin) return false;
-            }
-            return true;
+            float tmin = -tmax;
+            return box_hit_by_ray(_min_corner, _max_corner, ray.origin, ray.direction, tmin, tmax);
         }
 };
 
@@ -455,7 +460,7 @@ class Geometry
                 return _bounding_box.hit_by_ray(ray);
         }
 
-        virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const = 0;
+        virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const = 0;
 
     public:
         Geometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
@@ -468,15 +473,14 @@ class Geometry
         inline Vec3 texture_at(const Vec3& co) const { return _texture->value(co); }
         inline const BoundingBox& bounding_box() const { return _bounding_box; }
 
-        virtual Vec3 normal_at(const Vec3& point) const = 0;
-
-        virtual bool interception_with_ray(const Ray& ray, float& interception_distance)
+        virtual bool interception_with_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal)
         {
+            bool hit_by_ray = false;
             if(bounding_box_hit_by_ray(ray))
             {
-                return geometry_hit_by_ray(ray, interception_distance);
+                hit_by_ray = geometry_hit_by_ray(ray, interception_distance, interception_point, normal);
             }
-            return false;
+            return hit_by_ray;
         }
 };
 
@@ -492,13 +496,8 @@ class InfinitePlane: public Geometry
         _distance(distance), _normal(normal.normalized())
         {};
 
-        Vec3 normal_at(const Vec3& point) const
-        {
-            return _normal;
-        }
-
     private:
-        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const
         {
             float discriminant = _normal.dot(ray.direction);
             if(abs(discriminant) > 1e-3)
@@ -506,6 +505,9 @@ class InfinitePlane: public Geometry
                 float lambda = -(_distance+_normal.dot(ray.origin))/discriminant;
                 if(lambda < 0) return false;
                 interception_distance = lambda;
+
+                normal = _normal;
+                interception_point = ray.origin + interception_distance*ray.direction;
                 return true;
             }
             else return false;
@@ -526,18 +528,13 @@ class Sphere: public Geometry
             _bounding_box.setMaxCorner(_center+Vec3(radius, radius, radius));
         }
 
-        Vec3 normal_at(const Vec3& point) const
-        {
-            return (point-_center).normalized();
-        }
-
         bool has_interception_with_sphere(const Sphere& another_sphere) const
         {
             return _center.distance_to(another_sphere._center) <= (_radius + another_sphere._radius);
         }
 
     private:
-        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const
         {
             Vec3 t = ray.origin - _center;
             float a = ray.direction.sqr();
@@ -564,6 +561,8 @@ class Sphere: public Geometry
                     return false;
 
                 interception_distance = lambda;
+                interception_point = ray.origin + interception_distance*ray.direction;
+                normal = (interception_point-_center).normalized();
                 return true;
             }
             else // no interceptions
@@ -597,13 +596,8 @@ class Rectangle: public TransformGeometry
             _half_height = half_height;
         }
 
-        Vec3 normal_at(const Vec3& point) const
-        {
-            return transform().z;
-        }
-
     private:
-        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const
         {
             Vec3 origin = transform().reverse(ray.origin);
             Vec3 direction = transform().reverse_vector(ray.direction);
@@ -619,11 +613,61 @@ class Rectangle: public TransformGeometry
                     if((interception_x > -_half_width) && (interception_x < _half_width) && (interception_y > -_half_height) && (interception_y < _half_height))
                     {
                         interception_distance = lambda;
+                        interception_point = ray.origin + interception_distance*ray.direction;
+                        normal = transform().z;
                         return true;
                     }
                 }
             }
 
+            return false;
+        }
+};
+
+class Cube: public TransformGeometry
+{
+    private:
+        float _half_x;
+        float _half_y;
+        float _half_z;
+    public:
+        Cube(float half_x, float half_y, float half_z, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false) :
+        TransformGeometry(roughness, specularity, texture, is_emitter)
+        {
+            _half_x = half_x;
+            _half_y = half_y;
+            _half_z = half_z;
+        }
+
+    private:
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const
+        {
+            Vec3 origin = transform().reverse(ray.origin);
+            Vec3 direction = transform().reverse_vector(ray.direction);
+
+            const float eps = 1e-6;
+            float tmax = std::numeric_limits<float>::max();
+            float tmin = -tmax;
+            bool hit = box_hit_by_ray(Vec3(-_half_x, -_half_y, -_half_z), Vec3(_half_x, _half_y, _half_z), origin, direction, tmin, tmax);
+
+            if(hit)
+            {
+                if(tmin > 0)
+                {
+                    interception_distance = tmin;
+                    interception_point = ray.origin + interception_distance*ray.direction;
+
+                    Vec3 p = origin + interception_distance*direction;
+                    if(abs(p.x()-_half_x) < eps) { normal = Vec3(1,0,0); }
+                    else if(abs(p.x()+_half_x) < eps) { normal = Vec3(-1,0,0); }
+                    else if(abs(p.y()-_half_y) < eps) { normal = Vec3(0,1,0); }
+                    else if(abs(p.y()+_half_y) < eps) { normal = Vec3(0,-1,0); }
+                    else if(abs(p.z()-_half_z) < eps) { normal = Vec3(0,0,1); }
+                    else if(abs(p.z()+_half_z) < eps) { normal = Vec3(0,0,-1); }
+
+                    return true;
+                }
+            }
             return false;
         }
 };
@@ -708,7 +752,9 @@ class RayTracer
             for(auto geometry: _geometries)
             {
                 float interception_distance;
-                bool intercepted = geometry->interception_with_ray(ray, interception_distance);
+                Vec3 interception_point_;
+                Vec3 interception_point_normal_;
+                bool intercepted = geometry->interception_with_ray(ray, interception_distance, interception_point_, interception_point_normal_);
                 if(intercepted && interception_distance > 1e-4)
                 {
                     if(interception_distance < min_interception_distance)
@@ -716,15 +762,10 @@ class RayTracer
                         has_interception = true;
                         min_interception_distance = interception_distance;
                         intercepted_geometry = geometry;
+                        interception_point = interception_point_;
+                        interception_point_normal = interception_point_normal_;
                     }
                 }
-            }
-
-            if(has_interception)
-            {
-                interception_point = ray.origin + ray.direction*min_interception_distance;
-
-                interception_point_normal = intercepted_geometry->normal_at(interception_point);
             }
 
             return has_interception;
@@ -743,7 +784,8 @@ class RayTracer
                 if(geometry != intercepted_geometry)
                 {
                     float dist_to_geometry;
-                    bool intercepted = geometry->interception_with_ray(reverse_incident_light_ray, dist_to_geometry);
+                    Vec3 dummy1, dummy2;
+                    bool intercepted = geometry->interception_with_ray(reverse_incident_light_ray, dist_to_geometry, dummy1, dummy2);
 
                     if(intercepted && dist_to_geometry > 0 && dist_to_geometry < dist_to_light)
                     {
@@ -1160,15 +1202,15 @@ void test_scene3(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,0))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
     geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.6, /*half_height*/ 0.6, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 2, /*half_height*/ 2, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*10)), /*is_emitter*/ true));
         geometry->transform().x = Vec3(0, 0,1);
         geometry->transform().y = Vec3(0, 1,0);
         geometry->transform().z = Vec3(-1,0,0);
-        geometry->transform().t = Vec3(1.8,0.2,3.5);
+        geometry->transform().t = Vec3(2.8,0.2,3.5);
         geometries.push_back(geometry);
     }
 
@@ -1185,7 +1227,7 @@ void test_scene4(const Parameters& params)
     int num_samples = params.num_samples;
     int num_threads = params.num_threads;
     int max_num_bounces = params.max_num_bounces;
-    Vec3 ambient_color(0.1,0.1,0.1);
+    Vec3 ambient_color(0.2,0.2,0.2);
 
     // camera
     size_t W = 10*S, H = 10*S;
@@ -1208,16 +1250,60 @@ void test_scene4(const Parameters& params)
     // right
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(-1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
     // front
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/1, /*normal*/ Vec3(0,0,-2), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 2.5, /*normal*/ Vec3(0,0,-1), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*25)), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
+        cube->transform().t = Vec3(0.2,0.7,0);
+        geometries.push_back(cube);
+    }
+    {
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        cube->transform().t = Vec3(-0.2,0.4,1);
+        geometries.push_back(cube);
+    }
+    {
+        std::shared_ptr<TransformGeometry> geometry(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*50)), /*is_emitter*/ true));
         geometry->transform().x = Vec3(1,0,0);
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,1,0);
-        geometry->transform().t = Vec3(0,-0.999,0.4);
+        geometry->transform().t = Vec3(0,-0.999,1);
         geometries.push_back(geometry);
     }
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    cv::imwrite("test.png", img);
+}
+
+
+void test_scene5(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+    Vec3 ambient_color(0.1,0.1,0.1);
+
+    // camera
+    size_t W = 10*S, H = 10*S;
+    Camera camera(Vec3(0,0,-1), Vec3(0,0,1), Vec3(0,1,0), 4, 28, W, H, true);
+
+    // lights
+    std::vector<std::shared_ptr<Light>> lights;
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,0,1))));
+
+    // geometries
+    std::vector<std::shared_ptr<Geometry>> geometries;
+
+    float roughness = 0.4;
+    float specularity = 0.1;
+
+    std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 1, /*half_y*/ 1, /*half_z*/ 1, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
+    cube->transform().t = Vec3(0,0,2);
+    geometries.push_back(cube);
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
