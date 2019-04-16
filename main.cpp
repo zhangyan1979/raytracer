@@ -115,6 +115,11 @@ class Vec3
             _v[0] *= s; _v[1] *= s; _v[2] *= s;
         }
 
+        inline void operator*=(const Vec3& v2)
+        {
+            _v[0] *= v2[0]; _v[1] *= v2[1]; _v[2] *= v2[2];
+        }
+
         inline Vec3 operator*(float s)  const
         {
             return Vec3(_v[0]*s, _v[1]*s, _v[2]*s);
@@ -139,6 +144,11 @@ class Vec3
             return (*this-v2).norm();
         }
 };
+
+Vec3 operator *(float s, const Vec3& v)
+{
+    return Vec3(s*v.x(), s*v.y(), s*v.z());
+}
 
 Vec3 max(const Vec3& v1, const Vec3& v2)
 {
@@ -180,10 +190,10 @@ class Ray
         Vec3 origin;
         Vec3 direction;
         Vec3 color;
-        float intensity;
+        Vec3 intensity;
         bool debug;
 
-        Ray(const Vec3& o, const Vec3& v, const Vec3& c = Vec3(0,0,0), float i = 0)
+        Ray(const Vec3& o, const Vec3& v, const Vec3& c = Vec3(0,0,0), const Vec3& i = Vec3(0,0,0))
             :origin(o), direction(v), color(c), intensity(i), debug(false)
             {};
 };
@@ -282,11 +292,11 @@ class Camera
             if(_is_perspective)
             {
                 Vec3 point_on_the_plane_co = _right*x + _down*y + _origin;
-                return Ray(point_on_the_plane_co, (point_on_the_plane_co - _focal_point).normalized(), Vec3(0,0,0), 1);
+                return Ray(point_on_the_plane_co, (point_on_the_plane_co - _focal_point).normalized(), Vec3(0,0,0), Vec3(1,1,1));
             }
             else
             {
-                return Ray(_right*x + _down*y + _origin, _toward, Vec3(0,0,0), 1);
+                return Ray(_right*x + _down*y + _origin, _toward, Vec3(0,0,0), Vec3(1,1,1));
             }
         }
 
@@ -325,7 +335,7 @@ class SunLight: public Light
 
         Ray incidence_at(const Vec3& point) const
         {
-            return Ray(Vec3(0,0,0), _direction, _color, _intensity);
+            return Ray(Vec3(0,0,0), _direction, _color, Vec3(1,1,1)*_intensity);
         }
 };
 
@@ -343,7 +353,7 @@ class SpotLight: public Light
             Vec3 v = point - _position;
             float intensity = _intensity/(4*M_PI*v.sqr());
             v = v.normalized();
-            return Ray(_position, v, _color, intensity);
+            return Ray(_position, v, _color, Vec3(1,1,1)*intensity);
         }
 };
 
@@ -646,7 +656,7 @@ class RayTracer
 
             while(1)
             {
-                if(camera_ray.intensity < 1e-4) break;
+                if(camera_ray.intensity.norm() < 1e-4) break;
                 if(num_bounces >= max_num_bounces) break;
 
                 Vec3 interception_point, interception_point_normal;
@@ -656,30 +666,33 @@ class RayTracer
                 if(camera_ray_intercepted)
                 {
                     num_bounces ++;
-                    Vec3 interception_point_color = this->calc_interception_point_color(interception_point, interception_point_normal,  intercepted_geometry);
+
+                    Vec3 interception_point_albedo = intercepted_geometry->texture_at(interception_point);
+                    Vec3 interception_point_color = this->calc_interception_point_color(interception_point, interception_point_normal,  intercepted_geometry, interception_point_albedo);
 
                     // update camera ray
                     camera_ray.color += interception_point_color*camera_ray.intensity;
 
                     if(intercepted_geometry->is_emitter())
                     {
-                        camera_ray.intensity = 0;
+                        camera_ray.intensity = Vec3(0,0,0);
                     }
                     else
                     {
                         camera_ray.origin = interception_point;
                         Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
                         camera_ray.direction = reflection_dir;
-                        if(interception_point_normal.dot(reflection_dir) > 0)
-                            camera_ray.intensity *= 1-intercepted_geometry->roughness();
-                        else camera_ray.intensity = 0;
+                        float dot = interception_point_normal.dot(reflection_dir);
+                        if(dot > 0)
+                            camera_ray.intensity *= (1-intercepted_geometry->roughness())*dot*interception_point_albedo;
+                        else camera_ray.intensity = Vec3(0,0,0);
                     }
                 }
                 else // Ray will not meet any geometries and go to infinity.
                 {
                     if(num_bounces == 0)
                         camera_ray.color += _ambient_color*camera_ray.intensity;
-                    camera_ray.intensity = 0; // to make the loop break
+                    camera_ray.intensity = Vec3(0,0,0); // to make the loop break
                 }
             }
 
@@ -743,16 +756,16 @@ class RayTracer
             return light_ray_blocked;
         }
 
-        Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry) const
+        Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry, const Vec3& interception_point_albedo) const
         {
             Vec3 interception_point_color;
             if(intercepted_geometry->is_emitter())
             {
-                interception_point_color = intercepted_geometry->texture_at(interception_point);
+                interception_point_color = interception_point_albedo;
             }
             else
             {
-                interception_point_color = _ambient_color*intercepted_geometry->texture_at(interception_point)*intercepted_geometry->roughness();
+                interception_point_color = _ambient_color*interception_point_albedo*intercepted_geometry->roughness();
 
                 for(auto light: _lights)
                 {
@@ -765,7 +778,7 @@ class RayTracer
 
                         if(dot > 0)
                         {
-                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*intercepted_geometry->texture_at(interception_point)*intercepted_geometry->roughness()*dot;
+                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*interception_point_albedo*intercepted_geometry->roughness()*dot;
                         }
                     }
                 }
@@ -1172,7 +1185,7 @@ void test_scene4(const Parameters& params)
     int num_samples = params.num_samples;
     int num_threads = params.num_threads;
     int max_num_bounces = params.max_num_bounces;
-    Vec3 ambient_color(0.2,0.2,0.2);
+    Vec3 ambient_color(0.1,0.1,0.1);
 
     // camera
     size_t W = 10*S, H = 10*S;
@@ -1184,7 +1197,7 @@ void test_scene4(const Parameters& params)
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
 
-    float roughness = 0.3;
+    float roughness = 0.4;
     float specularity = 0.1;
     // bottom
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
@@ -1195,14 +1208,14 @@ void test_scene4(const Parameters& params)
     // right
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(-1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
     // front
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/1, /*normal*/ Vec3(0,0,-1.4), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/1, /*normal*/ Vec3(0,0,-2), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*20)), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*25)), /*is_emitter*/ true));
         geometry->transform().x = Vec3(1,0,0);
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,1,0);
-        geometry->transform().t = Vec3(0,-0.999,0.2);
+        geometry->transform().t = Vec3(0,-0.999,0.4);
         geometries.push_back(geometry);
     }
 
