@@ -22,7 +22,6 @@ inline float abs(float v)
     return v < 0 ? -v: v;
 }
 
-
 ///////////////////////////////////////////////////////////////////
 //
 // Vec3
@@ -178,6 +177,166 @@ std::ostream& operator << (std::ostream& out, const Vec3& v)
     return out;
 }
 
+///////////////////////////////////////////////////////////////////
+//
+// Mat3x3
+//
+///////////////////////////////////////////////////////////////////
+class Mat3x3
+{
+    private:
+        float _v[3][3];
+
+    public:
+        Vec3 column(int idx) const
+        {
+            return Vec3(_v[0][idx], _v[1][idx], _v[2][idx]);
+        }
+
+        Vec3 row(int idx) const
+        {
+            return Vec3(_v[idx][0], _v[idx][1], _v[idx][2]);
+        }
+
+        Mat3x3 operator+(const Mat3x3 &left) const
+        {
+            Mat3x3 result;
+            for(int i = 0; i < 3; i++)
+                for(int j = 0; j < 3; j++)
+                    result._v[i][j] = _v[i][j] + left._v[i][j];
+            return result;
+        }
+
+        Vec3 operator*(const Vec3& v) const
+        {
+            return Vec3(row(0).dot(v), row(1).dot(v), row(2).dot(v));
+        }
+
+        Mat3x3 operator*(const Mat3x3& m) const
+        {
+            Mat3x3 result;
+            for(int i = 0; i < 3; i++)
+            {
+                Vec3 r = row(i);
+                for(int j = 0; j < 3; j++)
+                    result._v[i][j] = r.dot(m.column(j));
+            }
+            return result;
+        }
+
+        static Mat3x3 diagonal(float s)
+        {
+            return diagonal(Vec3(s,s,s));
+        }
+
+        static Mat3x3 Rx(float angle)
+        {
+            float angle_ = angle/180*M_PI;
+            float cos_angle = cos(angle_);
+            float sin_angle = sin(angle_);
+
+            Mat3x3 result;
+            result._v[0][0] = 1;
+            result._v[0][1] = 0;
+            result._v[0][2] = 0;
+            result._v[1][0] = 0;
+            result._v[1][1] = cos_angle;
+            result._v[1][2] = -sin_angle;
+            result._v[2][0] = 0;
+            result._v[2][1] = sin_angle;
+            result._v[2][2] = cos_angle;
+
+            return result;
+        }
+
+        static Mat3x3 Ry(float angle)
+        {
+            float angle_ = angle/180*M_PI;
+            float cos_angle = cos(angle_);
+            float sin_angle = sin(angle_);
+
+            Mat3x3 result;
+            result._v[0][0] = cos_angle;
+            result._v[0][1] = 0;
+            result._v[0][2] = -sin_angle;
+            result._v[1][0] = 0;
+            result._v[1][1] = 1;
+            result._v[1][2] = 0;
+            result._v[2][0] = sin_angle;
+            result._v[2][1] = 0;
+            result._v[2][2] = cos_angle;
+
+            return result;
+        }
+
+        static Mat3x3 Rz(float angle)
+        {
+            float angle_ = angle/180*M_PI;
+            float cos_angle = cos(angle_);
+            float sin_angle = sin(angle_);
+
+            Mat3x3 result;
+            result._v[0][0] = cos_angle;
+            result._v[0][1] = -sin_angle;
+            result._v[0][2] = 0;
+            result._v[1][0] = sin_angle;
+            result._v[1][1] = cos_angle;
+            result._v[1][2] = 0;
+            result._v[2][0] = 0;
+            result._v[2][1] = 0;
+            result._v[2][2] = 1;
+
+            return result;
+        }
+
+        static Mat3x3 diagonal(const Vec3& v)
+        {
+            Mat3x3 result;
+            result._v[0][0] = v.x();
+            result._v[0][1] = 0;
+            result._v[0][2] = 0;
+            result._v[1][0] = 0;
+            result._v[1][1] = v.y();
+            result._v[1][2] = 0;
+            result._v[2][0] = 0;
+            result._v[2][1] = 0;
+            result._v[2][2] = v.z();
+
+            return result;
+        }
+
+        static Mat3x3 outer_product(const Vec3& a, const Vec3& b)
+        {
+            Mat3x3 result;
+            result._v[0][0] = a.x()*b.x();
+            result._v[0][1] = a.x()*b.y();
+            result._v[0][2] = a.x()*b.z();
+            result._v[1][0] = a.y()*b.x();
+            result._v[1][1] = a.y()*b.y();
+            result._v[1][2] = a.y()*b.z();
+            result._v[2][0] = a.z()*b.x();
+            result._v[2][1] = a.z()*b.y();
+            result._v[2][2] = a.z()*b.z();
+
+            return result;
+        }
+
+        static Mat3x3 cross(const Vec3& v)
+        {
+            Mat3x3 result;
+            result._v[0][0] = 0;
+            result._v[0][1] = -v.z();
+            result._v[0][2] = v.y();
+            result._v[1][0] = v.z();
+            result._v[1][1] = 0;
+            result._v[1][2] = -v.x();
+            result._v[2][0] = -v.y();
+            result._v[2][1] = v.x();
+            result._v[2][2] = 0;
+
+            return result;
+        }
+};
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -231,6 +390,27 @@ class Transform
         {
             return Vec3(x.dot(v), y.dot(v), z.dot(v));
         }
+
+        void euler(float x_angle, float y_angle, float z_angle)
+        {
+            Mat3x3 R = Mat3x3::Rx(x_angle)*Mat3x3::Ry(y_angle)*Mat3x3::Rz(z_angle);
+            x = (R*x).normalized();
+            y = (R*y).normalized();
+            z = (R*z).normalized();
+        }
+
+
+        // void rotate_along_vector(const Vec3& v, float theta)
+        // // theta --- in degrees
+        // {
+        //     Vec3 v_ = v.normalized();
+        //     float cos_theta = cos(theta/180*M_PI);
+
+        //     Mat3x3 R = Mat3x3::cross(v_) + Mat3x3::outer_product(v_, v_) + Mat3x3::diagonal(cos_theta);
+        //     x = (R*x).normalized();
+        //     y = (R*y).normalized();
+        //     z = (R*z).normalized();
+        // }
 };
 
 ///////////////////////////////////////////////////////////////////
@@ -1231,7 +1411,7 @@ void test_scene4(const Parameters& params)
 
     // camera
     size_t W = 10*S, H = 10*S;
-    Camera camera(Vec3(0,0,-1), Vec3(0,0,1), Vec3(0,1,0), 4, 28, W, H, true);
+    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.2,1), Vec3(0,1,0), 4, 28, W, H, true);
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
@@ -1253,12 +1433,14 @@ void test_scene4(const Parameters& params)
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 2.5, /*normal*/ Vec3(0,0,-1), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
-        cube->transform().t = Vec3(0.2,0.7,0);
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
+        cube->transform().euler(0, -30, 0);
+        cube->transform().t = Vec3(0.3,0.7,0);
         geometries.push_back(cube);
     }
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        cube->transform().euler(0, -30, 0);
         cube->transform().t = Vec3(-0.2,0.4,1);
         geometries.push_back(cube);
     }
