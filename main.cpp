@@ -14,6 +14,17 @@
 
 ///////////////////////////////////////////////////////////////////
 //
+// facilites
+//
+///////////////////////////////////////////////////////////////////
+inline float abs(float v)
+{
+    return v < 0 ? -v: v;
+}
+
+
+///////////////////////////////////////////////////////////////////
+//
 // Vec3
 //
 ///////////////////////////////////////////////////////////////////
@@ -94,12 +105,12 @@ class Vec3
             return Vec3(_v[0]-v2._v[0], _v[1]-v2._v[1], _v[2]-v2._v[2]);
         }
 
-        inline Vec3 operator+=(const Vec3& v2)
+        inline void operator+=(const Vec3& v2)
         {
             _v[0] += v2._v[0]; _v[1] += v2._v[1]; _v[2] += v2._v[2];
         }
 
-        inline Vec3 operator*=(float s)
+        inline void operator*=(float s)
         {
             _v[0] *= s; _v[1] *= s; _v[2] *= s;
         }
@@ -170,10 +181,46 @@ class Ray
         Vec3 direction;
         Vec3 color;
         float intensity;
+        bool debug;
 
         Ray(const Vec3& o, const Vec3& v, const Vec3& c = Vec3(0,0,0), float i = 0)
-            :origin(o), direction(v), color(c), intensity(i)
+            :origin(o), direction(v), color(c), intensity(i), debug(false)
             {};
+};
+
+///////////////////////////////////////////////////////////////////
+//
+// Transform
+//
+///////////////////////////////////////////////////////////////////
+class Transform
+{
+    public:
+        Vec3 x, y, z, t;
+    public:
+        Transform(): x(1,0,0), y(0,1,0), z(0,0,1), t(0,0,0) {};
+        Transform(const Vec3& x_, const Vec3& y_, const Vec3& z_, const Vec3& t_): x(x_), y(y_), z(z_), t(t_) {};
+
+        inline Vec3 forward(const Vec3& v) const
+        {
+            return x*v.x() + y*v.y() + z*v.z() + t;
+        }
+
+        inline Vec3 reverse(const Vec3& v) const
+        {
+            Vec3 vv = v - t;
+            return Vec3(x.dot(vv), y.dot(vv), z.dot(vv));
+        }
+
+        inline Vec3 forward_vector(const Vec3& v) const
+        {
+            return x*v.x() + y*v.y() + z*v.z();
+        }
+
+        inline Vec3 reverse_vector(const Vec3& v) const
+        {
+            return Vec3(x.dot(v), y.dot(v), z.dot(v));
+        }
 };
 
 ///////////////////////////////////////////////////////////////////
@@ -398,11 +445,6 @@ class Geometry
         }
 };
 
-inline float abs(float v)
-{
-    return v < 0 ? -v: v;
-}
-
 class InfinitePlane: public Geometry
 {
     private:
@@ -494,6 +536,63 @@ class Sphere: public Geometry
         }
 };
 
+class TransformGeometry: public Geometry
+{
+    private:
+        Transform _transform;
+    public:
+        TransformGeometry(float roughness, float specularity, const Vec3& albedo, bool is_emitter)
+        : Geometry(roughness, specularity, albedo, is_emitter)
+        {}
+
+        Transform& transform() { return _transform; }
+        const Transform& transform() const { return _transform; }
+};
+
+class Rectangle: public TransformGeometry
+{
+    private:
+        float _half_width;
+        float _half_height;
+    public:
+        Rectangle(float half_width, float half_height, float roughness, float specularity, const Vec3& albedo, bool is_emitter = false) :
+        TransformGeometry(roughness, specularity, albedo, is_emitter)
+        {
+            _half_width = half_width;
+            _half_height = half_height;
+        }
+
+        Vec3 normal_at(const Vec3& point) const
+        {
+            return transform().z;
+        }
+
+    private:
+        bool geometry_hit_by_ray(const Ray& ray, float& interception_distance) const
+        {
+            Vec3 origin = transform().reverse(ray.origin);
+            Vec3 direction = transform().reverse_vector(ray.direction);
+
+            if(direction.z() != 0)
+            {
+                float lambda = -origin.z()/direction.z();
+                if(lambda > 0)
+                {
+                    float interception_x = origin.x() + lambda*direction.x();
+                    float interception_y = origin.y() + lambda*direction.y();
+
+                    if((interception_x > -_half_width) && (interception_x < _half_width) && (interception_y > -_half_height) && (interception_y < _half_height))
+                    {
+                        interception_distance = lambda;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+};
+
 ///////////////////////////////////////////////////////////////////
 //
 // Ray Tracer
@@ -519,6 +618,7 @@ class RayTracer
         int run(Ray& camera_ray, int max_num_bounces)
         {
             int num_bounces = 0;
+
             while(1)
             {
                 if(camera_ray.intensity < 1e-4) break;
@@ -879,7 +979,7 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
     const std::vector<std::shared_ptr<Light>>& lights,
     const Vec3& ambient_color)
 {
-    cv::Mat img(H, W, CV_8UC3);
+    cv::Mat img(H, W, CV_8UC3, cv::Scalar::all(0));
     std::vector<std::thread> threads;
 
     std::vector<Vec3> antialiasing_samples = get_antialiasing_samples(num_samples);
@@ -1002,6 +1102,42 @@ void test_scene2(const Parameters& params)
 
     cv::imwrite("test.png", img);
 }
+
+void test_scene3(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+    Vec3 ambient_color(0, 0, 0);
+
+    // camera
+    size_t W = 30*S, H = 20*S;
+    Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
+
+    // lights
+    std::vector<std::shared_ptr<Light>> lights;
+
+    // geometries
+    std::vector<std::shared_ptr<Geometry>> geometries;
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*albedo*/ Vec3(0,0,0), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*albedo*/ Vec3(1,0,0), /*is_emitter*/ false)));
+
+    {
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.6, /*half_height*/ 0.6, /*roughness*/ 0, /*specularity*/ 1, /*albedo*/ Vec3(1,1,1), /*is_emitter*/ true));
+        geometry->transform().x = Vec3(0, 0,1);
+        geometry->transform().y = Vec3(0, 1,0);
+        geometry->transform().z = Vec3(-1,0,0);
+        geometry->transform().t = Vec3(1.8,0.2,3.5);
+        geometries.push_back(geometry);
+    }
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    cv::imwrite("test.png", img);
+}
 ///////////////////////////////////////////////////////////////////
 //
 // main()
@@ -1014,7 +1150,7 @@ int main(int argc, char* argv[])
     // test_Vec3();
     // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene2(params);
+    test_scene3(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
