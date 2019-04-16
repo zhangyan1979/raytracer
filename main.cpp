@@ -1164,6 +1164,53 @@ void test_scene3(const Parameters& params)
 
     cv::imwrite("test.png", img);
 }
+
+void test_scene4(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+    Vec3 ambient_color(0.2,0.2,0.2);
+
+    // camera
+    size_t W = 10*S, H = 10*S;
+    Camera camera(Vec3(0,0,-1), Vec3(0,0,1), Vec3(0,1,0), 4, 28, W, H, true);
+
+    // lights
+    std::vector<std::shared_ptr<Light>> lights;
+
+    // geometries
+    std::vector<std::shared_ptr<Geometry>> geometries;
+
+    float roughness = 0.3;
+    float specularity = 0.1;
+    // bottom
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    // top
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,1,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    // left
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))), /*is_emitter*/ false)));
+    // right
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(-1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
+    // front
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/1, /*normal*/ Vec3(0,0,-1.4), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+
+    {
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*20)), /*is_emitter*/ true));
+        geometry->transform().x = Vec3(1,0,0);
+        geometry->transform().y = Vec3(0,0,1);
+        geometry->transform().z = Vec3(0,1,0);
+        geometry->transform().t = Vec3(0,-0.999,0.2);
+        geometries.push_back(geometry);
+    }
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    cv::imwrite("test.png", img);
+}
 ///////////////////////////////////////////////////////////////////
 //
 // main()
@@ -1176,7 +1223,7 @@ int main(int argc, char* argv[])
     // test_Vec3();
     // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene2(params);
+    test_scene4(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
