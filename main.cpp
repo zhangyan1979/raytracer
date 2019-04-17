@@ -125,6 +125,11 @@ class Vec3
             return Vec3(_v[0]*s, _v[1]*s, _v[2]*s);
         }
 
+        inline Vec3 operator/(float s)  const
+        {
+            return Vec3(_v[0]/s, _v[1]/s, _v[2]/s);
+        }
+
         inline float dot(const Vec3& v2) const
         {
             return _v[0]*v2._v[0] + _v[1]*v2._v[1] + _v[2]*v2._v[2];
@@ -753,6 +758,55 @@ class PerlinNoiseTexture: public Texture
         }
 };
 
+class ImageTexture: public Texture
+{
+    private:
+        cv::Mat _img;
+        int _width, _height;
+
+    private:
+        bool check_img_data() const
+        {
+            return _img.data ? true: false;
+        }
+
+    public:
+        ImageTexture(const std::string& img_fn)
+        {
+            _img = cv::imread(img_fn);
+            if(!check_img_data())
+                std::cout << "Warning: Image texture is empty." << std::endl;
+            _width = _img.size().width;
+            _height = _img.size().height;
+        }
+
+        Vec3 value(const Vec3& co) const
+        {
+            Vec3 value(0,0,0);
+            if(check_img_data()) {
+                float u = co.x(), v = co.y();
+                float x = u*(_width-1);
+                float y = v*(_height-1);
+                int xi = floor(x);
+                int yi = floor(y);
+                if(xi >= 0 && xi < _width && yi >=0 && yi < _height)
+                {
+                    uchar* p = (uchar*)_img.data;
+                    int idx = yi*_img.step + 3*xi;
+                    return Vec3(p[idx+2], p[idx+1], p[idx])/255.0;
+                    // cv::Vec3b v = _img.at<uchar>(yi, xi);
+                    // return Vec3(v[0],v[1],v[2]);
+                }
+            }
+            return value;
+        }
+
+        bool is_uv_texture() const
+        {
+            return true;
+        }
+};
+
 ///////////////////////////////////////////////////////////////////
 //
 // Geometry
@@ -896,6 +950,14 @@ class Sphere: public Geometry
             }
             else // no interceptions
                 return false;
+        }
+
+        virtual Vec3 map_to_uv_texture_space(const Vec3& xyz) const
+        {
+            Vec3 v = xyz-_center;
+            float theta = atan2(v.y(), v.x());
+            float phi = atan(v.z()/sqrt(v.x()*v.x() + v.y()*v.y()));
+            return Vec3((theta+M_PI)/(2*M_PI), (phi+M_PI/2)/M_PI, 0.0);
         }
 };
 
@@ -1626,7 +1688,7 @@ void test_scene5(const Parameters& params)
 
     // camera
     size_t W = 30*S, H = 20*S;
-    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.18,1), Vec3(0,1,0), 4, 25, W, H, true);
+    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.18,1), Vec3(0,1,0), 4, 32, W, H, true);
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
@@ -1634,18 +1696,18 @@ void test_scene5(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.5, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture()), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,5), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.5, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
         [](const Vec3& co)
         {
             return 8*co;
         },
         [](const Vec3& co, float noise)
         {
-            float v = 0.8*(0.5*(1+sin(8*co.x()+4*noise)));
+            float v = 0.8*(0.5*(1+sin(4*co.x()+2*noise)));
             return Vec3(v,v,v);
         }
     )), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")), /*is_emitter*/ false)));
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
