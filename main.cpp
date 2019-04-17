@@ -601,6 +601,9 @@ class Texture
 {
     public:
         virtual Vec3 value(const Vec3& co) const = 0;
+
+        // uv or 3d texture.
+        virtual bool is_uv_texture() const = 0;
 };
 
 class ConstantTexture : public Texture
@@ -613,6 +616,34 @@ class ConstantTexture : public Texture
         Vec3 value(const Vec3& co) const
         {
             return _albedo;
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
+        }
+};
+
+class CheckerBoxTexture: public Texture
+{
+    private:
+        Vec3 _albedo1;
+        Vec3 _albedo2;
+        Vec3 _frequency;
+
+    public:
+        CheckerBoxTexture(const Vec3& albedo1, const Vec3& albedo2, const Vec3& frequency) : _albedo1(albedo1), _albedo2(albedo2), _frequency(2*M_PI*frequency) {};
+
+        Vec3 value(const Vec3& co) const
+        {
+            Vec3 v = _frequency*co;
+            bool sign = sin(v.x())*sin(v.y())*sin(v.z()) > 0;
+            return sign ? _albedo1 : _albedo2;
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
         }
 };
 
@@ -642,6 +673,11 @@ class Geometry
 
         virtual bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const = 0;
 
+        virtual Vec3 map_to_uv_texture_space(const Vec3& xyz) const
+        {
+            return Vec3(0,0,0);
+        }
+
     public:
         Geometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
         : _roughness(roughness), _specularity(specularity), _texture(texture), _is_emitter(is_emitter)
@@ -650,8 +686,15 @@ class Geometry
         inline bool is_emitter() const { return _is_emitter; }
         inline float roughness() const { return _roughness; }
         inline float specularity() const { return _specularity; }
-        inline Vec3 texture_at(const Vec3& co) const { return _texture->value(co); }
         inline const BoundingBox& bounding_box() const { return _bounding_box; }
+
+        inline Vec3 texture_at(const Vec3& co) const
+        {
+            if(_texture->is_uv_texture())
+                return _texture->value(map_to_uv_texture_space(co));
+            else
+                return _texture->value(co);
+        }
 
         virtual bool interception_with_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal)
         {
@@ -1440,13 +1483,13 @@ void test_scene4(const Parameters& params)
     geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 2.5, /*normal*/ Vec3(0,0,-1), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
 
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ 0.8, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
         cube->transform().euler(0, -30, 0);
         cube->transform().t = Vec3(0.3,0.7,0);
         geometries.push_back(cube);
     }
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ 0.8, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
         cube->transform().euler(0, -30, 0);
         cube->transform().t = Vec3(-0.2,0.4,1);
         geometries.push_back(cube);
@@ -1466,7 +1509,6 @@ void test_scene4(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
-
 void test_scene5(const Parameters& params)
 {
     // parameters
@@ -1474,26 +1516,20 @@ void test_scene5(const Parameters& params)
     int num_samples = params.num_samples;
     int num_threads = params.num_threads;
     int max_num_bounces = params.max_num_bounces;
-    Vec3 ambient_color(0,0,0);
+    Vec3 ambient_color(0.6,0.6,0.8);
 
     // camera
-    size_t W = 10*S, H = 10*S;
-    Camera camera(Vec3(0,0,-1), Vec3(0,0,1), Vec3(0,1,0), 4, 28, W, H, true);
+    size_t W = 30*S, H = 20*S;
+    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.18,1), Vec3(0,1,0), 4, 18, W, H, true);
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
-    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 2, Vec3(0,0,1))));
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 2, Vec3(0,1,0))));
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-
-    float roughness = 0.4;
-    float specularity = 0.1;
-
-    std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 1, /*half_y*/ 1, /*half_z*/ 1, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
-    cube->transform().t = Vec3(0,0,2);
-    cube->transform().euler(120,0,0);
-    geometries.push_back(cube);
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new CheckerBoxTexture(Vec3(1,1,1), Vec3(0.5,0.8,0.5), Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,5), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new CheckerBoxTexture(Vec3(1,1,1), Vec3(0.5,0.5,0.8), 2*Vec3(1,1,1))), /*is_emitter*/ false)));
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
@@ -1512,7 +1548,7 @@ int main(int argc, char* argv[])
     // test_Vec3();
     // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene4(params);
+    test_scene5(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
