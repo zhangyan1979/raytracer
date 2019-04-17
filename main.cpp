@@ -675,6 +675,43 @@ class PerlinNoise {
 
 ///////////////////////////////////////////////////////////////////
 //
+// Material
+//
+///////////////////////////////////////////////////////////////////
+class Material
+{
+    public:
+        bool is_emitter;
+        float diffusion_factor;
+        float reflection_factor;
+        float refraction_factor;
+        float reflection_specularity;
+        float refraction_specularity;
+        float index_of_refraction;
+        bool enhance_reflection;
+
+        Material(bool is_emitter_,
+            float diffusion_factor_,
+            float reflection_factor_,
+            float refraction_factor_,
+            float reflection_specularity_,
+            float refraction_specularity_,
+            float index_of_refraction_,
+            bool enhance_reflection_)
+        {
+            is_emitter = is_emitter_;
+            diffusion_factor = diffusion_factor_;
+            reflection_factor = reflection_factor_;
+            refraction_factor = refraction_factor_;
+            reflection_specularity = reflection_specularity_;
+            refraction_specularity = refraction_specularity_;
+            index_of_refraction = index_of_refraction_;
+            enhance_reflection = enhance_reflection_;
+        }
+};
+
+///////////////////////////////////////////////////////////////////
+//
 // Texture
 //
 ///////////////////////////////////////////////////////////////////
@@ -815,12 +852,13 @@ class ImageTexture: public Texture
 class Geometry
 {
     protected:
-        float _roughness;
-        float _specularity;
+        std::shared_ptr<Material> _material;
         std::shared_ptr<Texture> _texture;
         BoundingBox _bounding_box;
-        bool _is_emitter;
 
+        // float _roughness;
+        // float _specularity;
+        // bool _is_emitter;
 
     private:
         bool bounding_box_hit_by_ray(const Ray& ray)
@@ -839,13 +877,15 @@ class Geometry
         }
 
     public:
-        Geometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
-        : _roughness(roughness), _specularity(specularity), _texture(texture), _is_emitter(is_emitter)
+        Geometry(const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture)
+        : _material(material), _texture(texture)
         {}
 
-        inline bool is_emitter() const { return _is_emitter; }
-        inline float roughness() const { return _roughness; }
-        inline float specularity() const { return _specularity; }
+        inline std::shared_ptr<Material> material() const
+        {
+            return _material;
+        }
+
         inline const BoundingBox& bounding_box() const { return _bounding_box; }
 
         inline Vec3 texture_at(const Vec3& co) const
@@ -874,9 +914,10 @@ class InfinitePlane: public Geometry
         Vec3 _normal;
 
     public:
-        InfinitePlane(float distance, const Vec3& normal, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false)
-        : Geometry(roughness, specularity, texture, is_emitter),
-        _distance(distance), _normal(normal.normalized())
+        InfinitePlane(float distance, const Vec3& normal,const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture)
+        : Geometry(material, texture),
+        _distance(distance),
+        _normal(normal.normalized())
         {};
 
     private:
@@ -904,8 +945,8 @@ class Sphere: public Geometry
         float _radius;
 
     public:
-        Sphere(const Vec3& center, float radius, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false)
-        : Geometry(roughness, specularity, texture, is_emitter), _center(center), _radius(radius)
+        Sphere(const Vec3& center, float radius, const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture)
+        : Geometry(material, texture), _center(center), _radius(radius)
         {
             _bounding_box.setMinCorner(_center-Vec3(radius, radius, radius));
             _bounding_box.setMaxCorner(_center+Vec3(radius, radius, radius));
@@ -966,8 +1007,8 @@ class TransformGeometry: public Geometry
     private:
         Transform _transform;
     public:
-        TransformGeometry(float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter)
-        : Geometry(roughness, specularity, texture, is_emitter)
+        TransformGeometry(const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture)
+        : Geometry(material, texture)
         {}
 
         Transform& transform() { return _transform; }
@@ -980,8 +1021,8 @@ class Rectangle: public TransformGeometry
         float _half_width;
         float _half_height;
     public:
-        Rectangle(float half_width, float half_height, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false) :
-        TransformGeometry(roughness, specularity, texture, is_emitter)
+        Rectangle(float half_width, float half_height, const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture) :
+        TransformGeometry(material, texture)
         {
             _half_width = half_width;
             _half_height = half_height;
@@ -1022,8 +1063,8 @@ class Cube: public TransformGeometry
         float _half_y;
         float _half_z;
     public:
-        Cube(float half_x, float half_y, float half_z, float roughness, float specularity, const std::shared_ptr<Texture>& texture, bool is_emitter = false) :
-        TransformGeometry(roughness, specularity, texture, is_emitter)
+        Cube(float half_x, float half_y, float half_z, const std::shared_ptr<Material>& material, const std::shared_ptr<Texture>& texture) :
+        TransformGeometry(material, texture)
         {
             _half_x = half_x;
             _half_y = half_y;
@@ -1108,8 +1149,9 @@ class RayTracer
 
                     // update camera ray
                     camera_ray.color += interception_point_color*camera_ray.intensity;
+                    std::shared_ptr<Material> intercepted_geometry_material = intercepted_geometry->material();
 
-                    if(intercepted_geometry->is_emitter())
+                    if(intercepted_geometry_material->is_emitter)
                     {
                         camera_ray.intensity = Vec3(0,0,0);
                     }
@@ -1119,7 +1161,7 @@ class RayTracer
                         float dot = 0.0f;
                         for(int i = 0; i < 10; i++)
                         {
-                            Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
+                            Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry_material->reflection_specularity);
                             dot = interception_point_normal.dot(reflection_dir);
                             if(dot > 0)
                             {
@@ -1127,7 +1169,12 @@ class RayTracer
                                 break;
                             }
                         }
-                        camera_ray.intensity *= (1-intercepted_geometry->roughness())*dot*interception_point_albedo;
+
+
+                        if(intercepted_geometry_material->enhance_reflection)
+                            camera_ray.intensity *= intercepted_geometry_material->reflection_factor;
+                        else
+                            camera_ray.intensity *= intercepted_geometry_material->reflection_factor*dot*interception_point_albedo;
                     }
                 }
                 else // Ray will not meet any geometries and go to infinity.
@@ -1199,13 +1246,14 @@ class RayTracer
         Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry, const Vec3& interception_point_albedo) const
         {
             Vec3 interception_point_color;
-            if(intercepted_geometry->is_emitter())
+            std::shared_ptr<Material> material = intercepted_geometry->material();
+            if(material->is_emitter)
             {
                 interception_point_color = interception_point_albedo;
             }
             else
             {
-                interception_point_color = _ambient_color*interception_point_albedo*intercepted_geometry->roughness();
+                interception_point_color = _ambient_color*interception_point_albedo*material->diffusion_factor;
 
                 for(auto light: _lights)
                 {
@@ -1218,7 +1266,7 @@ class RayTracer
 
                         if(dot > 0)
                         {
-                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*interception_point_albedo*intercepted_geometry->roughness()*dot;
+                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*interception_point_albedo*material->diffusion_factor*dot;
                         }
                     }
                 }
@@ -1337,16 +1385,81 @@ void test_scene()
 
     Camera camera(Vec3(0,0.3,0), Vec3(0,0,1), Vec3(0,1,0), 1, 80, W, H, true);
     std::vector<std::shared_ptr<Light>> lights;
-    //lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(1,1,0))));
-    //lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(-1,1,0))));
-     lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 200, Vec3(0,-2,2))));
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.4, Vec3(0,0,1))));
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
+     //lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 500, Vec3(0,-2,2))));
 
 
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 1, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 0.8, /*roughness*/ 0.2, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(-1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.1, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,0))))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(1.8,0,3), /*radius*/ 0.8, /*roughness*/ 0.9, /*specularity*/ 0.4, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))))));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.1,
+                /*reflection_factor*/       1,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  1,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
+        )
+    );
+    // spherers
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0,0,3), /*radius*/ 0.8,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.3,
+                /*reflection_factor*/       1,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  1,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      false
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))
+        )
+    );
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/Vec3(-1.8,0,3), /*radius*/ 0.8,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.3,
+                /*reflection_factor*/       0.9,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.9,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,0))))
+        )
+    );
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(1.8,0,3), /*radius*/ 0.8,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.9,
+                /*reflection_factor*/       0.1,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.4,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))))
+        )
+    );
 
     Vec3 ambient_color(0.2, 0.2, 0.2);
     RayTracer ray_tracer(geometries, lights, ambient_color);
@@ -1543,31 +1656,100 @@ void test_scene2(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/Vec3(1.2,0,2), /*radius*/ 1.0, /*roughness*/ 0.1, /*specularity*/ 0.9, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0.6,0))))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.2, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0, /*roughness*/ 0.9, /*specularity*/ 0.4, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))), /*is_emitter*/ true)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.1,
+                /*reflection_factor*/       0.9,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.5,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))))
+        ));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/Vec3(1.2,0,2), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.1,
+                /*reflection_factor*/       0.9,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.5,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0.6,0))))
+        ));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0,0,3), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.2,
+                /*reflection_factor*/       0.8,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  1.0,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))
+        ));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              true,
+                /*diffusion_factor*/        0.9,
+                /*reflection_factor*/       0.1,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.4,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))))
+        ));
 
     int num_small_balls = 400;
     float small_ball_radius = 0.25;
     float distribute_range = 12;
     for(int i = 0; i < num_small_balls;) {
-        std::shared_ptr<Sphere> small_ball(new Sphere(
-            /*center*/ Vec3(
-                random_uniform(-distribute_range, distribute_range),
-                1-small_ball_radius,
-                random_uniform(-distribute_range, distribute_range)),
-            /*radius*/ small_ball_radius,
-            /*roughness*/ random_uniform(0.1, 1),
-            /*specularity*/ random_uniform(0.1, 1),
-            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
-                Vec3(
-                random_uniform(),
-                random_uniform(),
-                random_uniform()
-                ))),
-            /*is_emitter*/ random_uniform() > 0.8
-        ));
+        std::shared_ptr<Sphere> small_ball(
+            new Sphere(
+                /*center*/ Vec3(
+                    random_uniform(-distribute_range, distribute_range),
+                    1-small_ball_radius,
+                    random_uniform(-distribute_range, distribute_range)),
+                /*radius*/ small_ball_radius,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              random_uniform() > 0.8,
+                    /*diffusion_factor*/        random_uniform(0.1, 1),
+                    /*reflection_factor*/       random_uniform(0.1, 1),
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  random_uniform(0.1, 1),
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      true
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
+                    Vec3(
+                    random_uniform(),
+                    random_uniform(),
+                    random_uniform()
+                    )))
+            ));
 
         if(!spheres_have_interceptions(small_ball, geometries))
         {
@@ -1600,11 +1782,53 @@ void test_scene3(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.1,
+                    /*reflection_factor*/       0.9,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.2,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0,0,3), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.5,
+                    /*reflection_factor*/       0.5,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.5,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))));
 
     {
-        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(new Rectangle(/*half_width*/ 2, /*half_height*/ 2, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*10)), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> geometry = std::shared_ptr<TransformGeometry>(
+            new Rectangle(
+                /*half_width*/ 2, /*half_height*/ 2,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              true,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       1,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  1,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      true
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*10))));
         geometry->transform().x = Vec3(0, 0,1);
         geometry->transform().y = Vec3(0, 1,0);
         geometry->transform().z = Vec3(-1,0,0);
@@ -1637,33 +1861,106 @@ void test_scene4(const Parameters& params)
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
 
-    float roughness = 0.4;
-    float specularity = 0.1;
+    std::shared_ptr<Material> wall_material(
+        new Material
+        (
+            /*is_emitter*/              false,
+            /*diffusion_factor*/        0.4,
+            /*reflection_factor*/       0.6,
+            /*refraction_factor*/       0,
+            /*reflection_specularity*/  0.1,
+            /*refraction_specularity*/  0,
+            /*index_of_refraction*/     1,
+            /*enhance_reflection*/      false
+        ));
+
     // bottom
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ wall_material,
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))));
     // top
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,1,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,1,0),
+            /*material*/ wall_material,
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))));
     // left
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(1,0,0),
+            /*material*/ wall_material,
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))))));
     // right
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(-1,0,0), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(-1,0,0),
+            /*material*/ wall_material,
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))));
     // front
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 2.5, /*normal*/ Vec3(0,0,-1), /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 2.5, /*normal*/ Vec3(0,0,-1),
+            /*material*/ wall_material,
+        /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))));
 
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3, /*roughness*/ 0.8, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        std::shared_ptr<TransformGeometry> cube(
+            new Cube(
+                /*half_x*/ 0.3, /*half_y*/ 0.3, /*half_z*/ 0.3,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.8,
+                    /*reflection_factor*/       0.2,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.5,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)))));
         cube->transform().euler(0, -30, 0);
         cube->transform().t = Vec3(0.3,0.7,0);
         geometries.push_back(cube);
     }
     {
-        std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3, /*roughness*/ 0.8, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))), /*is_emitter*/ false));
+        std::shared_ptr<TransformGeometry> cube(
+            new Cube(
+                /*half_x*/ 0.3, /*half_y*/ 0.6, /*half_z*/ 0.3,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.8,
+                    /*reflection_factor*/       0.2,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.5,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)))));
         cube->transform().euler(0, -30, 0);
         cube->transform().t = Vec3(-0.2,0.4,1);
         geometries.push_back(cube);
     }
     {
-        std::shared_ptr<TransformGeometry> geometry(new Rectangle(/*half_width*/ 0.3, /*half_height*/ 0.3, /*roughness*/ 0, /*specularity*/ 1, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*50)), /*is_emitter*/ true));
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 0.3, /*half_height*/ 0.3,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              true,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       1,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  1,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*50))));
         geometry->transform().x = Vec3(1,0,0);
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,1,0);
@@ -1696,24 +1993,53 @@ void test_scene5(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.5, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
-        [](const Vec3& co)
-        {
-            return 8*co;
-        },
-        [](const Vec3& co, float noise)
-        {
-            float v = 0.8*(0.5*(1+sin(4*co.x()+2*noise)));
-            return Vec3(v,v,v);
-        }
-    )), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,3), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.5,
+                    /*reflection_factor*/       1.5,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.2,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
+            [](const Vec3& co)
+            {
+                return 8*co;
+            },
+            [](const Vec3& co, float noise)
+            {
+                float v = 0.8*(0.5*(1+sin(4*co.x()+2*noise)));
+                return Vec3(v,v,v);
+            }
+        )))));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0,0,3), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.5,
+                    /*reflection_factor*/       0.5,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.5,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")))));
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
     cv::imwrite("test.png", img);
 }
+
 ///////////////////////////////////////////////////////////////////
 //
 // main()
