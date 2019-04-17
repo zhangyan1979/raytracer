@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <thread>
 #include <mutex>
+#include <algorithm>
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -594,6 +595,81 @@ class BoundingBox
 
 ///////////////////////////////////////////////////////////////////
 //
+// PerlinNoise
+//
+///////////////////////////////////////////////////////////////////
+
+class PerlinNoise {
+    private:
+        // The permutation vector
+        std::vector<int> _p;
+
+    private:
+        float fade(float t) const
+        {
+            return t * t * t * (t * (t * 6 - 15) + 10);
+        }
+
+        float lerp(float t, float a, float b) const
+        {
+            return a + t * (b - a);
+        }
+
+        float grad(int hash, float x, float y, float z) const
+        {
+            int h = hash & 15;
+            // Convert lower 4 bits of hash into 12 gradient directions
+            float u = h < 8 ? x : y,
+                v = h < 4 ? y : h == 12 || h == 14 ? x : z;
+            return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+        }
+
+    public:
+        PerlinNoise()
+        {
+            _p.resize(256);
+            for(int i = 0; i < 256; i++)
+                _p[i] = i;
+            std::random_shuffle(_p.begin(), _p.end());
+            // Duplicate the permutation vector
+            _p.insert(_p.end(), _p.begin(), _p.end());
+        }
+
+        float get(const Vec3& vv) const
+        {
+            float x = vv.x(), y = vv.y(), z = vv.z();
+
+            // Find the unit cube that contains the point
+            int X = (int) floor(x) & 255;
+            int Y = (int) floor(y) & 255;
+            int Z = (int) floor(z) & 255;
+
+            // Find relative x, y,z of point in cube
+            x -= floor(x);
+            y -= floor(y);
+            z -= floor(z);
+
+            // Compute fade curves for each of x, y, z
+            float u = fade(x);
+            float v = fade(y);
+            float w = fade(z);
+
+            // Hash coordinates of the 8 cube corners
+            int A = _p[X] + Y;
+            int AA = _p[A] + Z;
+            int AB = _p[A + 1] + Z;
+            int B = _p[X + 1] + Y;
+            int BA = _p[B] + Z;
+            int BB = _p[B + 1] + Z;
+
+            // Add blended results from 8 corners of cube
+            double res = lerp(w, lerp(v, lerp(u, grad(_p[AA], x, y, z), grad(_p[BA], x-1, y, z)), lerp(u, grad(_p[AB], x, y-1, z), grad(_p[BB], x-1, y-1, z))), lerp(v, lerp(u, grad(_p[AA+1], x, y, z-1), grad(_p[BA+1], x-1, y, z-1)), lerp(u, grad(_p[AB+1], x, y-1, z-1), grad(_p[BB+1], x-1, y-1, z-1))));
+            return (res + 1.0)/2.0;
+        }
+};
+
+///////////////////////////////////////////////////////////////////
+//
 // Texture
 //
 ///////////////////////////////////////////////////////////////////
@@ -639,6 +715,36 @@ class CheckerBoxTexture: public Texture
             Vec3 v = _frequency*co;
             bool sign = sin(v.x())*sin(v.y())*sin(v.z()) > 0;
             return sign ? _albedo1 : _albedo2;
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
+        }
+};
+
+class PerlinNoiseTexture: public Texture
+{
+    public:
+        typedef Vec3 (*COORDINATE_TRANSFORM_FCN)(const Vec3&);
+        typedef Vec3 (*VALUE_TRANSFORM_FCN)(const Vec3&, float);
+
+    private:
+        PerlinNoise _noise;
+        COORDINATE_TRANSFORM_FCN _coord_transform_fcn;
+        VALUE_TRANSFORM_FCN _value_transform_fcn;
+
+    public:
+        PerlinNoiseTexture(COORDINATE_TRANSFORM_FCN coord_fcn = nullptr, VALUE_TRANSFORM_FCN value_fcn = nullptr)
+        {
+            _coord_transform_fcn = coord_fcn;
+            _value_transform_fcn = value_fcn;
+        }
+
+        Vec3 value(const Vec3& co) const
+        {
+            float s = _noise.get(_coord_transform_fcn ? _coord_transform_fcn(co) : co);
+            return _value_transform_fcn ? _value_transform_fcn(co, s) : Vec3(s,s,s);
         }
 
         bool is_uv_texture() const
@@ -1520,7 +1626,7 @@ void test_scene5(const Parameters& params)
 
     // camera
     size_t W = 30*S, H = 20*S;
-    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.18,1), Vec3(0,1,0), 4, 18, W, H, true);
+    Camera camera(Vec3(0,-0.2,-1), Vec3(0,0.18,1), Vec3(0,1,0), 4, 25, W, H, true);
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
@@ -1528,8 +1634,18 @@ void test_scene5(const Parameters& params)
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
-    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.1, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new CheckerBoxTexture(Vec3(1,1,1), Vec3(0.5,0.8,0.5), Vec3(1,1,1))), /*is_emitter*/ false)));
-    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,5), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new CheckerBoxTexture(Vec3(1,1,1), Vec3(0.5,0.5,0.8), 2*Vec3(1,1,1))), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new InfinitePlane(/*distnace*/ 1, /*normal*/ Vec3(0,-1,0), /*roughness*/ 0.5, /*specularity*/ 0.2, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture()), /*is_emitter*/ false)));
+    geometries.push_back(std::shared_ptr<Geometry>(new Sphere(/*center*/ Vec3(0,0,5), /*radius*/ 1.0, /*roughness*/ 0.5, /*specularity*/ 0.5, /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
+        [](const Vec3& co)
+        {
+            return 8*co;
+        },
+        [](const Vec3& co, float noise)
+        {
+            float v = 0.8*(0.5*(1+sin(8*co.x()+4*noise)));
+            return Vec3(v,v,v);
+        }
+    )), /*is_emitter*/ false)));
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
