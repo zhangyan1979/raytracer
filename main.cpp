@@ -844,6 +844,7 @@ class Cube: public TransformGeometry
                     else if(abs(p.y()+_half_y) < eps) { normal = Vec3(0,-1,0); }
                     else if(abs(p.z()-_half_z) < eps) { normal = Vec3(0,0,1); }
                     else if(abs(p.z()+_half_z) < eps) { normal = Vec3(0,0,-1); }
+                    normal = transform().forward_vector(normal);
 
                     return true;
                 }
@@ -904,12 +905,18 @@ class RayTracer
                     else
                     {
                         camera_ray.origin = interception_point;
-                        Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
-                        camera_ray.direction = reflection_dir;
-                        float dot = interception_point_normal.dot(reflection_dir);
-                        if(dot > 0)
-                            camera_ray.intensity *= (1-intercepted_geometry->roughness())*dot*interception_point_albedo;
-                        else camera_ray.intensity = Vec3(0,0,0);
+                        float dot = 0.0f;
+                        for(int i = 0; i < 10; i++)
+                        {
+                            Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry->specularity());
+                            dot = interception_point_normal.dot(reflection_dir);
+                            if(dot > 0)
+                            {
+                                camera_ray.direction = reflection_dir;
+                                break;
+                            }
+                        }
+                        camera_ray.intensity *= (1-intercepted_geometry->roughness())*dot*interception_point_albedo;
                     }
                 }
                 else // Ray will not meet any geometries and go to infinity.
@@ -1467,7 +1474,7 @@ void test_scene5(const Parameters& params)
     int num_samples = params.num_samples;
     int num_threads = params.num_threads;
     int max_num_bounces = params.max_num_bounces;
-    Vec3 ambient_color(0.1,0.1,0.1);
+    Vec3 ambient_color(0,0,0);
 
     // camera
     size_t W = 10*S, H = 10*S;
@@ -1475,7 +1482,7 @@ void test_scene5(const Parameters& params)
 
     // lights
     std::vector<std::shared_ptr<Light>> lights;
-    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,0,1))));
+    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 2, Vec3(0,0,1))));
 
     // geometries
     std::vector<std::shared_ptr<Geometry>> geometries;
@@ -1485,6 +1492,7 @@ void test_scene5(const Parameters& params)
 
     std::shared_ptr<TransformGeometry> cube(new Cube(/*half_x*/ 1, /*half_y*/ 1, /*half_z*/ 1, /*roughness*/ roughness, /*specularity*/ specularity, /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0,1))), /*is_emitter*/ false));
     cube->transform().t = Vec3(0,0,2);
+    cube->transform().euler(120,0,0);
     geometries.push_back(cube);
 
     // generate image using ray tracing
