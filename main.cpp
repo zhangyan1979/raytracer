@@ -1445,6 +1445,7 @@ std::vector<Vec3> get_antialiasing_samples(int num_samples, bool even = false)
     return samples;
 }
 
+// Scene: 3 spheres side by side.
 void test_scene()
 {
     int S = 10;
@@ -1702,6 +1703,7 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
     return img;
 }
 
+// Scene: tons of small balls (including ones emitting lights) scattered around.
 void test_scene2(const Parameters& params)
 {
     // parameters
@@ -1832,6 +1834,7 @@ void test_scene2(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
+// Scene: rectangle light source with a sphere.
 void test_scene3(const Parameters& params)
 {
     // parameters
@@ -1910,6 +1913,7 @@ void test_scene3(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
+// Scene: Cubes inside a lighting room.
 void test_scene4(const Parameters& params)
 {
     // parameters
@@ -2042,6 +2046,7 @@ void test_scene4(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
+// Scene: Geometries with purlin noise texture and image texture.
 void test_scene5(const Parameters& params)
 {
     // parameters
@@ -2108,7 +2113,7 @@ void test_scene5(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
-
+// Scene: Translucent sphere in front of the earth.
 void test_scene6(const Parameters& params)
 {
     // parameters
@@ -2255,6 +2260,192 @@ void test_scene6(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
+// Scene: Mimic the last scene in "Ray Tracing --- The Next Week".
+Camera get_lookat_camera(const Vec3& from, const Vec3& to, const Vec3& up, float focal_length, float view_angle, int width, int height)
+{
+    Vec3 toward = (to-from).normalized();
+    return Camera(from, toward, up, focal_length, view_angle, width, height);
+}
+
+void test_scene7(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+    Vec3 ambient_color(0.1,0.1,0.1);
+
+    // camera
+    size_t W = 10*S, H = 10*S;
+    Vec3 camera_from(-0.3,0.1,-1), camera_to(0,0,0);
+    Camera camera = get_lookat_camera(camera_from, camera_to, Vec3(0,1,0), 1.5, 45, W, H);
+    std::vector<std::shared_ptr<Light>> lights;
+    //lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,1,0))));
+
+    std::vector<std::shared_ptr<Geometry>> geometries;
+    // rectangle plane lights
+    {
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 1, /*half_height*/ 1,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              true,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       0,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     0,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(100*Vec3(1,1,1)))));
+        geometry->transform().x = Vec3(1,0,0);
+        geometry->transform().y = Vec3(0,0,1);
+        geometry->transform().z = Vec3(0,1,0);
+        //geometry->transform().euler(0, 20, 0);
+        geometry->transform().t = Vec3(0.5, -2.5, 4);
+        geometries.push_back(geometry);
+    }
+
+    // floor cubes
+    float cube_x = 0.2;
+    float cube_z = 0.2;
+    float floor_side_length = 5;
+    for(float x = -floor_side_length; x < floor_side_length; x+=2*cube_x)
+    {
+        for(float z = -floor_side_length; z < floor_side_length; z+=2*cube_z)
+        {
+            {
+                float cube_y = random_uniform(0, 0.3);
+                std::shared_ptr<TransformGeometry> cube(
+                    new Cube(
+                        /*half_x*/ cube_x, /*half_y*/ cube_y, /*half_z*/ cube_z,
+                        /*material*/ std::shared_ptr<Material>(new Material
+                        (
+                            /*is_emitter*/              false,
+                            /*diffusion_factor*/        0.8,
+                            /*reflection_factor*/       0.2,
+                            /*refraction_factor*/       0,
+                            /*reflection_specularity*/  0.5,
+                            /*refraction_specularity*/  0,
+                            /*index_of_refraction*/     1,
+                            /*enhance_reflection*/      false
+                        )),
+                        /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5, 0.8, 0.5)))));
+                cube->transform().t = Vec3(x, 1, z);
+
+                geometries.push_back(cube);
+            }
+        }
+    }
+
+    // perlin noise sphere
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(1,-0.5,2.5), /*radius*/ 0.5,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        2,
+                    /*reflection_factor*/       0.1,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.2,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
+            [](const Vec3& co)
+            {
+                return 20*co;
+            },
+            [](const Vec3& co, float noise)
+            {
+                float v = 1*(0.5*(1+cos(20*co.x()+5*noise)));
+                return Vec3(v,v,v);
+            }
+        )))));
+
+        // blue specular sphere
+        geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-.3, 0.4, 0.5), /*radius*/ 0.3,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.5,
+                    /*reflection_factor*/       0.2,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.9,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.4,0.4,0.8))
+            ))));
+
+        // glass ball
+        geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0.2, 0.6, 0.1), /*radius*/ 0.25,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       0.8,
+                    /*refraction_factor*/       0.8,
+                    /*reflection_specularity*/  0.9,
+                    /*refraction_specularity*/  0.99,
+                    /*index_of_refraction*/     1.04,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
+            ))));
+
+
+        // silver metal sphere
+        geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(1.6, 0.4, 1), /*radius*/ 0.2,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        0.5,
+                    /*reflection_factor*/       0.2,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0.1,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
+            ))));
+
+        // earth
+        geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-0.5, 0.1, 1.5), /*radius*/ 0.5,
+            /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              false,
+                    /*diffusion_factor*/        1,
+                    /*reflection_factor*/       0.1,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     1,
+                    /*enhance_reflection*/      false
+                )),
+            /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")
+            ))));
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    cv::imwrite("test.png", img);
+}
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -2267,7 +2458,7 @@ int main(int argc, char* argv[])
 
     auto t_start = std::chrono::high_resolution_clock::now();
     // test_scene();
-    test_scene6(params);
+    test_scene7(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
