@@ -23,6 +23,10 @@ inline float abs(float v)
     return v < 0 ? -v: v;
 }
 
+inline float sign(float v)
+{
+    return v < 0 ? -1:1;
+}
 ///////////////////////////////////////////////////////////////////
 //
 // Vec3
@@ -1158,23 +1162,62 @@ class RayTracer
                     else
                     {
                         camera_ray.origin = interception_point;
-                        float dot = 0.0f;
+
+                        enum ScatterType { SCATTER_REFLECTION, SCATTER_REFRACTION, SCATTER_DISAPPEAR };
+                        ScatterType scatter_type = SCATTER_DISAPPEAR;
+
                         for(int i = 0; i < 10; i++)
                         {
-                            Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry_material->reflection_specularity);
-                            dot = interception_point_normal.dot(reflection_dir);
-                            if(dot > 0)
+                            float pick_reflection_th = intercepted_geometry_material->reflection_factor/(intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
+
+                            if(random_uniform() < pick_reflection_th)
                             {
-                                camera_ray.direction = reflection_dir;
-                                break;
+                                Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry_material->reflection_specularity);
+
+                                if(interception_point_normal.dot(reflection_dir) > 0)
+                                {
+                                    camera_ray.direction = reflection_dir;
+                                    scatter_type = SCATTER_REFLECTION;
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                bool total_internal_refraction;
+                                Vec3 refraction_dir = get_refraction_dir(camera_ray.direction, interception_point_normal,
+                                intercepted_geometry_material->refraction_specularity, intercepted_geometry_material->index_of_refraction, total_internal_refraction);
+
+                                // no sign change means passing through a surface
+                                if(interception_point_normal.dot(camera_ray.direction)*interception_point_normal.dot(refraction_dir) > 0)
+                                {
+                                    camera_ray.direction = refraction_dir;
+                                    scatter_type = SCATTER_REFRACTION;
+                                    break;
+                                }
+
                             }
                         }
 
-
-                        if(intercepted_geometry_material->enhance_reflection)
-                            camera_ray.intensity *= intercepted_geometry_material->reflection_factor;
-                        else
-                            camera_ray.intensity *= intercepted_geometry_material->reflection_factor*dot*interception_point_albedo;
+                        if(scatter_type == SCATTER_REFLECTION)
+                        {
+                            if(intercepted_geometry_material->enhance_reflection)
+                            {
+                                camera_ray.intensity *= intercepted_geometry_material->reflection_factor;
+                            }
+                            else
+                            {
+                                float dot = camera_ray.direction.dot(interception_point_normal);
+                                camera_ray.intensity *= intercepted_geometry_material->reflection_factor*dot*interception_point_albedo;
+                            }
+                        }
+                        else if(scatter_type == SCATTER_REFRACTION)
+                        {
+                            camera_ray.intensity *= intercepted_geometry_material->refraction_factor;
+                        }
+                        else // SCATTER_DISAPPEAR
+                        {
+                            camera_ray.intensity = Vec3(0,0,0);
+                        }
                     }
                 }
                 else // Ray will not meet any geometries and go to infinity.
@@ -1290,6 +1333,31 @@ class RayTracer
                 reflection_dir = (idea_reflection_dir + random_in_unit_sphere()*(1-specularity)).normalized();
             }
             return reflection_dir;
+        }
+
+        Vec3 get_refraction_dir(const Vec3& incident_dir, const Vec3& normal, float specularity, float IOR, bool&total_internal_refraction)
+        {
+            // incident_dir and normal must be unit vector!
+            Vec3 perturbed_normal = (normal + random_in_unit_sphere()*(1-specularity)).normalized();
+
+            // the dot product indicates the light going in (<0) or out (>0) of the surface.
+            float dot = perturbed_normal.dot(incident_dir);
+            float refraction_index = (dot < 0) ? IOR : 1/IOR;
+            float sin_theta_in = sqrt(1-dot*dot);
+            float sin_theta_out = sin_theta_in/refraction_index;
+
+            if(sin_theta_out >= 1)
+            {
+                total_internal_refraction = true;
+                return get_reflection_dir(incident_dir, perturbed_normal, 1);
+            }
+            else
+            {
+                float cos_theta_out = sqrt(1-sin_theta_out*sin_theta_out);
+                Vec3 refraction_dir = (incident_dir-dot*perturbed_normal)/refraction_index + cos_theta_out*sign(dot)*perturbed_normal;
+                return refraction_dir;
+
+            }
         }
 };
 
@@ -2040,6 +2108,154 @@ void test_scene5(const Parameters& params)
     cv::imwrite("test.png", img);
 }
 
+
+void test_scene6(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
+    Vec3 ambient_color(0.1,0.1,0.1);
+
+    // camera
+    size_t W = 10*S, H = 10*S;
+    Camera camera(Vec3(0,0,0), Vec3(0,0,1), Vec3(0,1,0), 1, 40, W, H, true);
+    std::vector<std::shared_ptr<Light>> lights;
+    // lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 2, Vec3(0,1,0))));
+    // lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 2, Vec3(1,0,0))));
+
+    std::vector<std::shared_ptr<Geometry>> geometries;
+    // plane
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.2,
+                /*reflection_factor*/       0.2,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0.4,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     1,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
+        )
+    );
+    // earth
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/Vec3(-0.3,0,4), /*radius*/ 0.8,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.8,
+                /*reflection_factor*/       0.2,
+                /*refraction_factor*/       0,
+                /*reflection_specularity*/  0,
+                /*refraction_specularity*/  0,
+                /*index_of_refraction*/     0.5,
+                /*enhance_reflection*/      false
+            )),
+             /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")))
+        )
+    );
+
+    // rectangle plane lights
+    {
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 1, /*half_height*/ 1,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              true,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       0,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     0,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
+        geometry->transform().x = Vec3(0,0,1);
+        geometry->transform().y = Vec3(0,1,0);
+        geometry->transform().z = Vec3(-1,0,0);
+        geometry->transform().t = Vec3(3, 0, 3.5);
+        geometries.push_back(geometry);
+    }
+
+    {
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 1, /*half_height*/ 1,
+                /*material*/ std::shared_ptr<Material>(new Material
+                (
+                    /*is_emitter*/              true,
+                    /*diffusion_factor*/        0,
+                    /*reflection_factor*/       0,
+                    /*refraction_factor*/       0,
+                    /*reflection_specularity*/  0,
+                    /*refraction_specularity*/  0,
+                    /*index_of_refraction*/     0,
+                    /*enhance_reflection*/      false
+                )),
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
+        geometry->transform().x = Vec3(0,0,1);
+        geometry->transform().y = Vec3(1,0,0);
+        geometry->transform().z = Vec3(0,1,0);
+        geometry->transform().t = Vec3(0,-3,4);
+        geometries.push_back(geometry);
+    }
+
+    // translucent ball
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0.3,0,3), /*radius*/ 0.8,
+            /*material*/ std::shared_ptr<Material>(new Material
+            (
+                /*is_emitter*/              false,
+                /*diffusion_factor*/        0.1,
+                /*reflection_factor*/       0.1,
+                /*refraction_factor*/       1,
+                /*reflection_specularity*/  0.9,
+                /*refraction_specularity*/  0.9,
+                /*index_of_refraction*/     1.2,
+                /*enhance_reflection*/      true
+            )),
+            /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
+        )
+    );
+    // std::shared_ptr<TransformGeometry> geometry(
+    //     new Rectangle(
+    //         /*half_width*/ 1, /*half_height*/ 1,
+    //         /*material*/ std::shared_ptr<Material>(new Material
+    //         (
+    //             /*is_emitter*/              false,
+    //             /*diffusion_factor*/        0,
+    //             /*reflection_factor*/       0,
+    //             /*refraction_factor*/       1,
+    //             /*reflection_specularity*/  0,
+    //             /*refraction_specularity*/  0.5,
+    //             /*index_of_refraction*/     1.2,
+    //             /*enhance_reflection*/      false
+    //         )),
+    //         /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
+    // geometry->transform().x = Vec3(0,1,0);
+    // geometry->transform().y = Vec3(1,0,0);
+    // geometry->transform().z = Vec3(0,0,-1);
+    // geometry->transform().t = Vec3(0,0,1);
+    // geometries.push_back(geometry);
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    cv::imwrite("test.png", img);
+}
+
+
 ///////////////////////////////////////////////////////////////////
 //
 // main()
@@ -2049,10 +2265,9 @@ int main(int argc, char* argv[])
 {
     Parameters params = parse_params(argc, argv);
 
-    // test_Vec3();
-    // test_Camera();
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene5(params);
+    // test_scene();
+    test_scene6(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
