@@ -170,7 +170,7 @@ Vec3 max(const Vec3& v1, const Vec3& v2)
 
 float random_uniform(float min = 0, float max = 1)
 {
-    return min + (float(random())/RAND_MAX)*(max-min);
+    return min + (float(rand())/RAND_MAX)*(max-min);
 }
 
 Vec3 random_in_unit_sphere()
@@ -1161,9 +1161,11 @@ class RayTracer
                         enum ScatterType { SCATTER_DIFFUSION, SCATTER_REFLECTION, SCATTER_REFRACTION, SCATTER_DISAPPEAR };
                         ScatterType scatter_type = SCATTER_DISAPPEAR;
 
+                        float reflection_factor = calc_fresnel_reflection_factor(camera_ray, interception_point_normal, intercepted_geometry_material);
+
                         for(int i = 0; i < 10; i++)
                         {
-                            float pick_diffusion_th = intercepted_geometry_material->diffusion_factor/(intercepted_geometry_material->diffusion_factor+intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
+                            float pick_diffusion_th = intercepted_geometry_material->diffusion_factor/(intercepted_geometry_material->diffusion_factor+reflection_factor+intercepted_geometry_material->refraction_factor);
 
                             if(random_uniform() < pick_diffusion_th)
                             {
@@ -1174,7 +1176,7 @@ class RayTracer
                             }
                             else
                             {
-                                float pick_reflection_th = intercepted_geometry_material->reflection_factor/(intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
+                                float pick_reflection_th = reflection_factor/(reflection_factor+intercepted_geometry_material->refraction_factor);
 
                                 if(random_uniform() < pick_reflection_th)
                                 {
@@ -1213,7 +1215,7 @@ class RayTracer
                         }
                         else if(scatter_type == SCATTER_REFLECTION)
                         {
-                                camera_ray.intensity *= dot*interception_point_albedo;
+                            camera_ray.intensity *= dot*interception_point_albedo;
                         }
                         else if(scatter_type == SCATTER_REFRACTION)
                         {
@@ -1374,6 +1376,16 @@ class RayTracer
                 return refraction_dir;
 
             }
+        }
+
+        float calc_fresnel_reflection_factor(const Ray& incident_ray, const Vec3& normal, const std::shared_ptr<Material> material)
+        {
+            float F0 = material->reflection_factor/(material->diffusion_factor+material->reflection_factor+material->refraction_factor);
+            float incident_dot = abs(incident_ray.direction.dot(normal));
+            float fresnel_factor = F0 + (1-F0)*pow(1-incident_dot, 5);
+            float reflection_factor = fresnel_factor/(1-fresnel_factor)*(material->diffusion_factor+material->refraction_factor);
+
+            return reflection_factor;
         }
 };
 
@@ -2400,11 +2412,11 @@ void test_scene7(const Parameters& params)
                 (
                     /*is_emitter*/              false,
                     /*diffusion_factor*/        0,
-                    /*reflection_factor*/       0.8,
+                    /*reflection_factor*/       0.1,
                     /*refraction_factor*/       0.8,
                     /*reflection_specularity*/  0.9,
                     /*refraction_specularity*/  0.99,
-                    /*index_of_refraction*/     1.02
+                    /*index_of_refraction*/     1.4
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
             ))));
