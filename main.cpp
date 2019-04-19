@@ -12,6 +12,7 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
+#include <assert.h>
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -1639,7 +1640,7 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
     const std::vector<std::shared_ptr<Light>>& lights,
     const Vec3& ambient_color)
 {
-    cv::Mat img(H, W, CV_8UC3, cv::Scalar::all(0));
+    cv::Mat img(H, W, CV_32FC3, cv::Scalar::all(0.0f));
     std::vector<std::thread> threads;
 
     std::vector<Vec3> antialiasing_samples = get_antialiasing_samples(num_samples);
@@ -1656,6 +1657,7 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
         threads.push_back(std::thread(
             [i, num_threads, max_num_bounces, total_pixels, &camera, &geometries, &lights, &ambient_color, &antialiasing_samples, &img, &pixel_coords, &pop_pixel_mutex]()
             {
+                float* const img_data = (float*)img.data;
                 RayTracer ray_tracer(geometries, lights, ambient_color);
 
                 while(1)
@@ -1682,10 +1684,10 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
                     }
                     color *= 1.0f/(antialiasing_samples.size());
 
-                    int idx = img.step*int(y) + 3*int(x);
-                    img.data[idx+0] = std::min(255, int(0.5+255*color.b()));
-                    img.data[idx+1] = std::min(255, int(0.5+255*color.g()));
-                    img.data[idx+2] = std::min(255, int(0.5+255*color.r()));
+                    int idx = img.step/sizeof(float)*int(y) + 3*int(x);
+                    img_data[idx+0] = color.b();
+                    img_data[idx+1] = color.g();
+                    img_data[idx+2] = color.r();
 
                     if(i == 0)
                     {
@@ -1701,6 +1703,24 @@ cv::Mat generate_image2(int H, int W, int num_threads, int max_num_bounces, int 
         thread.join();
 
     return img;
+}
+
+void save_img(const std::string& fn, const cv::Mat& img)
+{
+    cv::Mat u8_img, tmp_img;
+    tmp_img = 255*img;
+    tmp_img.convertTo(u8_img, CV_8UC3);
+    cv::imwrite(fn+".png", u8_img);
+
+    assert(img.step == sizeof(float)*3*img.cols);
+    FILE* fid = fopen((fn+".raw").c_str(), "wb");
+    if(fid)
+    {
+        fwrite(&img.rows, sizeof(int), 1, fid);
+        fwrite(&img.cols, sizeof(int), 1, fid);
+        fwrite(img.data, sizeof(float), img.rows*img.cols*3, fid);
+        fclose(fid);
+    }
 }
 
 // Scene: tons of small balls (including ones emitting lights) scattered around.
@@ -1831,7 +1851,7 @@ void test_scene2(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 // Scene: rectangle light source with a sphere.
@@ -1910,7 +1930,7 @@ void test_scene3(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 // Scene: Cubes inside a lighting room.
@@ -2043,7 +2063,7 @@ void test_scene4(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 // Scene: Geometries with purlin noise texture and image texture.
@@ -2110,7 +2130,7 @@ void test_scene5(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 // Scene: Translucent sphere in front of the earth.
@@ -2257,7 +2277,7 @@ void test_scene6(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 // Scene: Mimic the last scene in "Ray Tracing --- The Next Week".
@@ -2389,7 +2409,7 @@ void test_scene7(const Parameters& params)
         // glass ball
         geometries.push_back(std::shared_ptr<Geometry>(
         new Sphere(
-            /*center*/ Vec3(0.2, 0.6, 0.1), /*radius*/ 0.25,
+            /*center*/ Vec3(0.2, 0.5, 0.1), /*radius*/ 0.25,
             /*material*/ std::shared_ptr<Material>(new Material
                 (
                     /*is_emitter*/              false,
@@ -2444,7 +2464,7 @@ void test_scene7(const Parameters& params)
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
 
-    cv::imwrite("test.png", img);
+    save_img("test", img);
 }
 
 ///////////////////////////////////////////////////////////////////
