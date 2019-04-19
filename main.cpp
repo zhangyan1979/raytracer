@@ -409,20 +409,17 @@ class Transform
             y = (R*y).normalized();
             z = (R*z).normalized();
         }
-
-
-        // void rotate_along_vector(const Vec3& v, float theta)
-        // // theta --- in degrees
-        // {
-        //     Vec3 v_ = v.normalized();
-        //     float cos_theta = cos(theta/180*M_PI);
-
-        //     Mat3x3 R = Mat3x3::cross(v_) + Mat3x3::outer_product(v_, v_) + Mat3x3::diagonal(cos_theta);
-        //     x = (R*x).normalized();
-        //     y = (R*y).normalized();
-        //     z = (R*z).normalized();
-        // }
 };
+
+Vec3 rotate_along_vector(const Vec3& v, const Vec3& pivot_v, float theta)
+// theta --- in degrees
+{
+    Vec3 v_ = pivot_v.normalized();
+    float cos_theta = cos(theta/180*M_PI);
+
+    Mat3x3 R = Mat3x3::cross(v_) + Mat3x3::outer_product(v_, v_) + Mat3x3::diagonal(cos_theta);
+    return R*v;
+}
 
 ///////////////////////////////////////////////////////////////////
 //
@@ -1164,56 +1161,73 @@ class RayTracer
                     {
                         camera_ray.origin = interception_point;
 
-                        enum ScatterType { SCATTER_REFLECTION, SCATTER_REFRACTION, SCATTER_DISAPPEAR };
+                        enum ScatterType { SCATTER_DIFFUSION, SCATTER_REFLECTION, SCATTER_REFRACTION, SCATTER_DISAPPEAR };
                         ScatterType scatter_type = SCATTER_DISAPPEAR;
 
                         for(int i = 0; i < 10; i++)
                         {
-                            float pick_reflection_th = intercepted_geometry_material->reflection_factor/(intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
+                            float pick_diffusion_th = intercepted_geometry_material->diffusion_factor/(intercepted_geometry_material->diffusion_factor+intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
 
-                            if(random_uniform() < pick_reflection_th)
+                            if(random_uniform() < pick_diffusion_th)
                             {
-                                Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry_material->reflection_specularity);
-
-                                if(interception_point_normal.dot(reflection_dir) > 0)
-                                {
-                                    camera_ray.direction = reflection_dir;
-                                    scatter_type = SCATTER_REFLECTION;
-                                    break;
-                                }
+                                Vec3 diffusion_dir = get_diffusion_dir(interception_point_normal);
+                                camera_ray.direction = diffusion_dir;
+                                scatter_type = SCATTER_DIFFUSION;
+                                break;
                             }
                             else
                             {
-                                bool total_internal_refraction;
-                                Vec3 refraction_dir = get_refraction_dir(camera_ray.direction, interception_point_normal,
-                                intercepted_geometry_material->refraction_specularity, intercepted_geometry_material->index_of_refraction, total_internal_refraction);
+                                float pick_reflection_th = intercepted_geometry_material->reflection_factor/(intercepted_geometry_material->reflection_factor+intercepted_geometry_material->refraction_factor);
 
-                                // no sign change means passing through a surface
-                                if(interception_point_normal.dot(camera_ray.direction)*interception_point_normal.dot(refraction_dir) > 0)
+                                if(random_uniform() < pick_reflection_th)
                                 {
-                                    camera_ray.direction = refraction_dir;
-                                    scatter_type = SCATTER_REFRACTION;
-                                    break;
-                                }
+                                    Vec3 reflection_dir = get_reflection_dir(camera_ray.direction, interception_point_normal, intercepted_geometry_material->reflection_specularity);
 
+                                    if(interception_point_normal.dot(reflection_dir) > 0)
+                                    {
+                                        camera_ray.direction = reflection_dir;
+                                        scatter_type = SCATTER_REFLECTION;
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    bool total_internal_refraction;
+                                    Vec3 refraction_dir = get_refraction_dir(camera_ray.direction, interception_point_normal,
+                                    intercepted_geometry_material->refraction_specularity, intercepted_geometry_material->index_of_refraction, total_internal_refraction);
+
+                                    // no sign change means passing through a surface
+                                    if(interception_point_normal.dot(camera_ray.direction)*interception_point_normal.dot(refraction_dir) > 0)
+                                    {
+                                        camera_ray.direction = refraction_dir;
+                                        scatter_type = SCATTER_REFRACTION;
+                                        break;
+                                    }
+
+                                }
                             }
                         }
 
-                        if(scatter_type == SCATTER_REFLECTION)
+                        if(scatter_type == SCATTER_DIFFUSION)
+                        {
+                            float dot = camera_ray.direction.dot(interception_point_normal);
+                            camera_ray.intensity *= dot*interception_point_albedo;
+                        }
+                        else if(scatter_type == SCATTER_REFLECTION)
                         {
                             if(intercepted_geometry_material->enhance_reflection)
                             {
-                                camera_ray.intensity *= intercepted_geometry_material->reflection_factor;
+                                camera_ray.intensity *= interception_point_albedo;
                             }
                             else
                             {
                                 float dot = camera_ray.direction.dot(interception_point_normal);
-                                camera_ray.intensity *= intercepted_geometry_material->reflection_factor*dot*interception_point_albedo;
+                                camera_ray.intensity *= dot*interception_point_albedo;
                             }
                         }
                         else if(scatter_type == SCATTER_REFRACTION)
                         {
-                            camera_ray.intensity *= intercepted_geometry_material->refraction_factor;
+                            camera_ray.intensity *= 1;
                         }
                         else // SCATTER_DISAPPEAR
                         {
@@ -1297,7 +1311,7 @@ class RayTracer
             }
             else
             {
-                interception_point_color = _ambient_color*interception_point_albedo*material->diffusion_factor;
+                interception_point_color = _ambient_color*interception_point_albedo;
 
                 for(auto light: _lights)
                 {
@@ -1310,13 +1324,24 @@ class RayTracer
 
                         if(dot > 0)
                         {
-                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*interception_point_albedo*material->diffusion_factor*dot;
+                            interception_point_color += incident_light_ray.color*incident_light_ray.intensity*interception_point_albedo*dot;
                         }
                     }
                 }
             }
 
             return interception_point_color;
+        }
+
+        Vec3 get_diffusion_dir(const Vec3& normal)
+        {
+            Vec3 random_dir;
+            while(1)
+            {
+                random_dir = random_in_unit_sphere();
+                if(random_dir.dot(normal) >= 0) break;
+            }
+            return random_dir;
         }
 
         Vec3 get_reflection_dir(const Vec3& incident_dir, const Vec3& normal, float specularity, bool perturb_normal = true)
@@ -2294,14 +2319,13 @@ void test_scene7(const Parameters& params)
     int num_samples = params.num_samples;
     int num_threads = params.num_threads;
     int max_num_bounces = params.max_num_bounces;
-    Vec3 ambient_color(0.1,0.1,0.1);
+    Vec3 ambient_color(0,0,0);
 
     // camera
     size_t W = 10*S, H = 10*S;
     Vec3 camera_from(-0.3,0.1,-1), camera_to(0,0,0);
     Camera camera = get_lookat_camera(camera_from, camera_to, Vec3(0,1,0), 1.5, 45, W, H);
     std::vector<std::shared_ptr<Light>> lights;
-    //lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,1,0))));
 
     std::vector<std::shared_ptr<Geometry>> geometries;
     // rectangle plane lights
@@ -2325,7 +2349,7 @@ void test_scene7(const Parameters& params)
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,1,0);
         //geometry->transform().euler(0, 20, 0);
-        geometry->transform().t = Vec3(0.5, -2.5, 4);
+        geometry->transform().t = Vec3(0.5, -2.5, 2);
         geometries.push_back(geometry);
     }
 
@@ -2346,9 +2370,9 @@ void test_scene7(const Parameters& params)
                         (
                             /*is_emitter*/              false,
                             /*diffusion_factor*/        0.8,
-                            /*reflection_factor*/       0.2,
+                            /*reflection_factor*/       0.5,
                             /*refraction_factor*/       0,
-                            /*reflection_specularity*/  0.5,
+                            /*reflection_specularity*/  0.8,
                             /*refraction_specularity*/  0,
                             /*index_of_refraction*/     1,
                             /*enhance_reflection*/      false
@@ -2418,7 +2442,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0.8,
                     /*reflection_specularity*/  0.9,
                     /*refraction_specularity*/  0.99,
-                    /*index_of_refraction*/     1.04,
+                    /*index_of_refraction*/     1.02,
                     /*enhance_reflection*/      false
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
