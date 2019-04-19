@@ -1161,11 +1161,15 @@ class RayTracer
                         enum ScatterType { SCATTER_DIFFUSION, SCATTER_REFLECTION, SCATTER_REFRACTION, SCATTER_DISAPPEAR };
                         ScatterType scatter_type = SCATTER_DISAPPEAR;
 
-                        float reflection_factor = calc_fresnel_reflection_factor(camera_ray, interception_point_normal, intercepted_geometry_material);
+                        float incident_dot = camera_ray.direction.dot(interception_point_normal);
+                        // if ray is inside a geometry, only refraction is allowed.
+                        bool ray_is_inside_geometry = incident_dot > 0;
+                        float reflection_factor = ray_is_inside_geometry ? 0: calc_fresnel_reflection_factor(camera_ray, interception_point_normal, intercepted_geometry_material);
+                        float diffusion_factor = ray_is_inside_geometry ? 0: intercepted_geometry_material->diffusion_factor;
 
                         for(int i = 0; i < 10; i++)
                         {
-                            float pick_diffusion_th = intercepted_geometry_material->diffusion_factor/(intercepted_geometry_material->diffusion_factor+reflection_factor+intercepted_geometry_material->refraction_factor);
+                            float pick_diffusion_th = diffusion_factor/(diffusion_factor+reflection_factor+intercepted_geometry_material->refraction_factor);
 
                             if(random_uniform() < pick_diffusion_th)
                             {
@@ -1196,7 +1200,7 @@ class RayTracer
                                     intercepted_geometry_material->refraction_specularity, intercepted_geometry_material->index_of_refraction, total_internal_refraction);
 
                                     // no sign change means passing through a surface
-                                    if(interception_point_normal.dot(camera_ray.direction)*interception_point_normal.dot(refraction_dir) > 0)
+                                    if(incident_dot*interception_point_normal.dot(refraction_dir) > 0)
                                     {
                                         camera_ray.direction = refraction_dir;
                                         scatter_type = SCATTER_REFRACTION;
@@ -1207,10 +1211,10 @@ class RayTracer
                             }
                         }
 
+
                         float dot = camera_ray.direction.dot(interception_point_normal);
                         if(scatter_type == SCATTER_DIFFUSION)
                         {
-
                             camera_ray.intensity *= dot*interception_point_albedo;
                         }
                         else if(scatter_type == SCATTER_REFLECTION)
@@ -2407,12 +2411,12 @@ void test_scene7(const Parameters& params)
         // glass ball
         geometries.push_back(std::shared_ptr<Geometry>(
         new Sphere(
-            /*center*/ Vec3(0.2, 0.5, 0.1), /*radius*/ 0.25,
+            /*center*/ Vec3(0.2, 0.55, 0.1), /*radius*/ 0.25,
             /*material*/ std::shared_ptr<Material>(new Material
                 (
                     /*is_emitter*/              false,
                     /*diffusion_factor*/        0,
-                    /*reflection_factor*/       0.1,
+                    /*reflection_factor*/       0.05,
                     /*refraction_factor*/       0.8,
                     /*reflection_specularity*/  0.9,
                     /*refraction_specularity*/  0.99,
