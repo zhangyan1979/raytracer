@@ -1359,18 +1359,18 @@ class RayTracer
             // the dot product indicates the light going in (<0) or out (>0) of the surface.
             float dot = perturbed_normal.dot(incident_dir);
             float refraction_index = (dot < 0) ? IOR : 1/IOR;
-            float sin_theta_in = sqrt(1-dot*dot);
-            float sin_theta_out = sin_theta_in/refraction_index;
+            float sqr_sin_theta_in = 1-dot*dot;
+            float sqr_sin_theta_out = sqr_sin_theta_in/(refraction_index*refraction_index);
 
-            if(sin_theta_out >= 1)
+            if(sqr_sin_theta_out >= 1)
             {
                 total_internal_refraction = true;
                 return get_reflection_dir(incident_dir, perturbed_normal, 1);
             }
             else
             {
-                float cos_theta_out = sqrt(1-sin_theta_out*sin_theta_out);
-                Vec3 refraction_dir = (incident_dir-dot*perturbed_normal)/refraction_index + cos_theta_out*sign(dot)*perturbed_normal;
+                float cos_theta_out = sqrt(1-sqr_sin_theta_out);
+                Vec3 refraction_dir = (incident_dir-dot*perturbed_normal)/refraction_index - cos_theta_out*perturbed_normal;
                 return refraction_dir;
 
             }
