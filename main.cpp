@@ -690,7 +690,6 @@ class Material
         float reflection_specularity;
         float refraction_specularity;
         float index_of_refraction;
-        bool enhance_reflection;
 
         Material(bool is_emitter_,
             float diffusion_factor_,
@@ -698,8 +697,7 @@ class Material
             float refraction_factor_,
             float reflection_specularity_,
             float refraction_specularity_,
-            float index_of_refraction_,
-            bool enhance_reflection_)
+            float index_of_refraction_)
         {
             is_emitter = is_emitter_;
             diffusion_factor = diffusion_factor_;
@@ -708,7 +706,6 @@ class Material
             reflection_specularity = reflection_specularity_;
             refraction_specularity = refraction_specularity_;
             index_of_refraction = index_of_refraction_;
-            enhance_reflection = enhance_reflection_;
         }
 };
 
@@ -1208,22 +1205,15 @@ class RayTracer
                             }
                         }
 
+                        float dot = camera_ray.direction.dot(interception_point_normal);
                         if(scatter_type == SCATTER_DIFFUSION)
                         {
-                            float dot = camera_ray.direction.dot(interception_point_normal);
+
                             camera_ray.intensity *= dot*interception_point_albedo;
                         }
                         else if(scatter_type == SCATTER_REFLECTION)
                         {
-                            if(intercepted_geometry_material->enhance_reflection)
-                            {
-                                camera_ray.intensity *= interception_point_albedo;
-                            }
-                            else
-                            {
-                                float dot = camera_ray.direction.dot(interception_point_normal);
                                 camera_ray.intensity *= dot*interception_point_albedo;
-                            }
                         }
                         else if(scatter_type == SCATTER_REFRACTION)
                         {
@@ -1497,8 +1487,7 @@ void test_scene()
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  1,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
         )
@@ -1515,8 +1504,7 @@ void test_scene()
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  1,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      false
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))
         )
@@ -1532,8 +1520,7 @@ void test_scene()
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.9,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
              /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,0))))
         )
@@ -1549,8 +1536,7 @@ void test_scene()
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.4,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,1,0))))
         )
@@ -1782,8 +1768,7 @@ void test_scene2(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.5,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))))
         ));
@@ -1798,8 +1783,7 @@ void test_scene2(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.5,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0.6,0))))
         ));
@@ -1814,8 +1798,7 @@ void test_scene2(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  1.0,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))
         ));
@@ -1830,8 +1813,7 @@ void test_scene2(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.4,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))))
         ));
@@ -1855,8 +1837,7 @@ void test_scene2(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  random_uniform(0.1, 1),
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      true
+                    /*index_of_refraction*/     1
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
                     Vec3(
@@ -1909,8 +1890,7 @@ void test_scene3(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.2,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))));
     geometries.push_back(std::shared_ptr<Geometry>(
@@ -1924,8 +1904,7 @@ void test_scene3(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.5,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,0,0))))));
 
@@ -1941,8 +1920,7 @@ void test_scene3(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  1,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      true
+                    /*index_of_refraction*/     1
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*10))));
         geometry->transform().x = Vec3(0, 0,1);
@@ -1987,8 +1965,7 @@ void test_scene4(const Parameters& params)
             /*refraction_factor*/       0,
             /*reflection_specularity*/  0.1,
             /*refraction_specularity*/  0,
-            /*index_of_refraction*/     1,
-            /*enhance_reflection*/      false
+            /*index_of_refraction*/     1
         ));
 
     // bottom
@@ -2034,8 +2011,7 @@ void test_scene4(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.5,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)))));
         cube->transform().euler(0, -30, 0);
@@ -2054,8 +2030,7 @@ void test_scene4(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.5,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)))));
         cube->transform().euler(0, -30, 0);
@@ -2074,8 +2049,7 @@ void test_scene4(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  1,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1)*50))));
         geometry->transform().x = Vec3(1,0,0);
@@ -2122,8 +2096,7 @@ void test_scene5(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.2,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
             [](const Vec3& co)
@@ -2147,8 +2120,7 @@ void test_scene5(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.5,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")))));
 
@@ -2188,8 +2160,7 @@ void test_scene6(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0.4,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     1,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
         )
@@ -2206,8 +2177,7 @@ void test_scene6(const Parameters& params)
                 /*refraction_factor*/       0,
                 /*reflection_specularity*/  0,
                 /*refraction_specularity*/  0,
-                /*index_of_refraction*/     0.5,
-                /*enhance_reflection*/      false
+                /*index_of_refraction*/     0.5
             )),
              /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")))
         )
@@ -2226,8 +2196,7 @@ void test_scene6(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     0,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     0
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
         geometry->transform().x = Vec3(0,0,1);
@@ -2249,8 +2218,7 @@ void test_scene6(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     0,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     0
                 )),
                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
         geometry->transform().x = Vec3(0,0,1);
@@ -2272,8 +2240,7 @@ void test_scene6(const Parameters& params)
                 /*refraction_factor*/       1,
                 /*reflection_specularity*/  0.9,
                 /*refraction_specularity*/  0.9,
-                /*index_of_refraction*/     1.2,
-                /*enhance_reflection*/      true
+                /*index_of_refraction*/     1.2
             )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))))
         )
@@ -2289,8 +2256,7 @@ void test_scene6(const Parameters& params)
     //             /*refraction_factor*/       1,
     //             /*reflection_specularity*/  0,
     //             /*refraction_specularity*/  0.5,
-    //             /*index_of_refraction*/     1.2,
-    //             /*enhance_reflection*/      false
+    //             /*index_of_refraction*/     1.2
     //         )),
     //         /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(60*Vec3(1,1,1)))));
     // geometry->transform().x = Vec3(0,1,0);
@@ -2341,10 +2307,9 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     0,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     0
                 )),
-                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(100*Vec3(1,1,1)))));
+                /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(50*Vec3(1,1,1)))));
         geometry->transform().x = Vec3(1,0,0);
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,1,0);
@@ -2374,8 +2339,7 @@ void test_scene7(const Parameters& params)
                             /*refraction_factor*/       0,
                             /*reflection_specularity*/  0.8,
                             /*refraction_specularity*/  0,
-                            /*index_of_refraction*/     1,
-                            /*enhance_reflection*/      false
+                            /*index_of_refraction*/     1
                         )),
                         /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5, 0.8, 0.5)))));
                 cube->transform().t = Vec3(x, 1, z);
@@ -2397,8 +2361,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.2,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new PerlinNoiseTexture(
             [](const Vec3& co)
@@ -2424,8 +2387,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.9,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.4,0.4,0.8))
             ))));
@@ -2442,8 +2404,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0.8,
                     /*reflection_specularity*/  0.9,
                     /*refraction_specularity*/  0.99,
-                    /*index_of_refraction*/     1.02,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1.02
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
             ))));
@@ -2461,8 +2422,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0.1,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(1,1,1))
             ))));
@@ -2479,8 +2439,7 @@ void test_scene7(const Parameters& params)
                     /*refraction_factor*/       0,
                     /*reflection_specularity*/  0,
                     /*refraction_specularity*/  0,
-                    /*index_of_refraction*/     1,
-                    /*enhance_reflection*/      false
+                    /*index_of_refraction*/     1
                 )),
             /*texture*/ std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg")
             ))));
@@ -2501,7 +2460,6 @@ int main(int argc, char* argv[])
     Parameters params = parse_params(argc, argv);
 
     auto t_start = std::chrono::high_resolution_clock::now();
-    // test_scene();
     test_scene7(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
