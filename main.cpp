@@ -831,7 +831,7 @@ class EmissionMaterial : public Material
         bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
         {
             // no scattering
-            out_ray.color = _color*_intensity;
+            out_ray.color = _color*_intensity*in_ray.intensity;
             out_ray.intensity = Vec3(0,0,0);
             return true;
         }
@@ -883,6 +883,7 @@ class ReflectionMaterial : public Material
     private:
         float _specularity;
         bool _perturb_normal;
+        Vec3 _fresnel;
 
     public:
         ReflectionMaterial(float specularity, bool _perturb_normal = true) :
@@ -2529,7 +2530,7 @@ void test_scene(const Parameters& params)
     Vec3 camera_from(0,0,0), camera_to(0,0,1);
     Camera camera = get_lookat_camera(camera_from, camera_to, Vec3(0, 1,0), 1, 90, W, H);
     std::vector<std::shared_ptr<Light>> lights;
-    lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,1,0))));
+    //lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,1,0))));
 
     std::vector<std::shared_ptr<Geometry>> geometries;
 
@@ -2607,22 +2608,22 @@ void test_scene(const Parameters& params)
         )
     ));
 
-    //  // rectangle plane lights
-    // {
-    //     std::shared_ptr<TransformGeometry> geometry(
-    //         new Rectangle(
-    //             /*half_width*/ 0.8, /*half_height*/ 0.8,
-    //             /*material*/ std::shared_ptr<Material>(
-    //                 new EmissionMaterial(Vec3(1,1,1), 1)
-    //             )
-    //         ));
-    //     geometry->transform().x = Vec3(1,0,0);
-    //     geometry->transform().y = Vec3(0,0,1);
-    //     geometry->transform().z = Vec3(0,-1,0);
-    //     //geometry->transform().euler(0, 20, 0);
-    //     geometry->transform().t = Vec3(0, 1, 1);
-    //     geometries.push_back(geometry);
-    // }
+     // rectangle plane lights
+    {
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 1, /*half_height*/ 1,
+                /*material*/ std::shared_ptr<Material>(
+                    new EmissionMaterial(Vec3(1,1,1), 4)
+                )
+            ));
+        geometry->transform().x = Vec3(1,0,0);
+        geometry->transform().y = Vec3(0,0,1);
+        geometry->transform().z = Vec3(0,-1,0);
+        //geometry->transform().euler(0, 20, 0);
+        geometry->transform().t = Vec3(0, -2, 1);
+        geometries.push_back(geometry);
+    }
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
