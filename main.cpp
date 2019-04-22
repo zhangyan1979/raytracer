@@ -19,11 +19,6 @@
 // facilites
 //
 ///////////////////////////////////////////////////////////////////
-/*inline float abs(float v)
-{
-    return v < 0 ? -v: v;
-}*/
-
 inline float sign(float v)
 {
     return v < 0 ? -1:1;
@@ -813,7 +808,7 @@ class EmissionMaterial : public Material
         bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
         {
             // no scattering
-            out_ray.color = _color;
+            out_ray.color = _color*_intensity;
             out_ray.intensity = Vec3(0,0,0);
             return true;
         }
@@ -866,7 +861,7 @@ class ReflectionMaterial : public Material
             _specularity(specularity), _perturb_normal(_perturb_normal)
         {}
 
-        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
         {
             Vec3 reflection_dir;
             if(_perturb_normal) // perturb reflection through perturbing normal
@@ -884,13 +879,13 @@ class ReflectionMaterial : public Material
             {
                 out_ray.origin = interception_point;
                 out_ray.direction = reflection_dir;
-                out_ray.intensity *= reflection_dir.dot(interception_point_normal)*interception_point_albedo;
+                out_ray.intensity *= reflection_dir.dot(interception_point_normal)/*interception_point_albedo*/;
                 return true;
             }
-            else return true;
+            else return false;
         }
 
-        Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
         {
             return Vec3(0,0,0);
         }
@@ -906,7 +901,7 @@ class RefractionMaterial : public Material
             _specularity(specularity), _IOR(IOR)
         {}
 
-        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
         {
             // incident_dir and normal must be unit vector!
             Vec3 perturbed_normal = (interception_point_normal + random_in_unit_sphere()*(1-_specularity)).normalized();
@@ -938,7 +933,7 @@ class RefractionMaterial : public Material
             }
         }
 
-        Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
         {
             return Vec3(0,0,0);
         }
@@ -1017,7 +1012,7 @@ class InfinitePlane: public Geometry
         bool geometry_hit_by_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal) const
         {
             float discriminant = _normal.dot(ray.direction);
-            if(abs(discriminant) > 1e-3)
+            if(std::abs(discriminant) > 1e-3)
             {
                 float lambda = -(_distance+_normal.dot(ray.origin))/discriminant;
                 if(lambda < 0) return false;
@@ -1183,12 +1178,12 @@ class Cube: public TransformGeometry
                     interception_point = ray.origin + interception_distance*ray.direction;
 
                     Vec3 p = origin + interception_distance*direction;
-                    if(abs(p.x()-_half_x) < eps) { normal = Vec3(1,0,0); }
-                    else if(abs(p.x()+_half_x) < eps) { normal = Vec3(-1,0,0); }
-                    else if(abs(p.y()-_half_y) < eps) { normal = Vec3(0,1,0); }
-                    else if(abs(p.y()+_half_y) < eps) { normal = Vec3(0,-1,0); }
-                    else if(abs(p.z()-_half_z) < eps) { normal = Vec3(0,0,1); }
-                    else if(abs(p.z()+_half_z) < eps) { normal = Vec3(0,0,-1); }
+                    if(std::abs(p.x()-_half_x) < eps) { normal = Vec3(1,0,0); }
+                    else if(std::abs(p.x()+_half_x) < eps) { normal = Vec3(-1,0,0); }
+                    else if(std::abs(p.y()-_half_y) < eps) { normal = Vec3(0,1,0); }
+                    else if(std::abs(p.y()+_half_y) < eps) { normal = Vec3(0,-1,0); }
+                    else if(std::abs(p.z()-_half_z) < eps) { normal = Vec3(0,0,1); }
+                    else if(std::abs(p.z()+_half_z) < eps) { normal = Vec3(0,0,-1); }
                     normal = transform().forward_vector(normal);
 
                     return true;
@@ -1324,7 +1319,6 @@ class RayTracer
         Vec3 calc_interception_point_color(const Vec3& interception_point, const Vec3& interception_point_normal, const std::shared_ptr<Geometry>& intercepted_geometry, const Vec3& interception_point_albedo) const
         {
             Vec3 interception_point_color;
-            std::shared_ptr<Material> material = intercepted_geometry->material();
 
             interception_point_color = _ambient_color*interception_point_albedo;
 
@@ -2432,24 +2426,95 @@ void test_scene(const Parameters& params)
 
     // camera
     size_t W = 10*S, H = 10*S;
-    Vec3 camera_from(-0.3,0.1,-1), camera_to(0,0,0);
-    Camera camera = get_lookat_camera(camera_from, camera_to, Vec3(0,1,0), 1.5, 45, W, H);
+    Vec3 camera_from(0,0,0), camera_to(0,0,1);
+    Camera camera = get_lookat_camera(camera_from, camera_to, Vec3(0, 1,0), 1, 90, W, H);
     std::vector<std::shared_ptr<Light>> lights;
     lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 1, Vec3(0,1,0))));
 
     std::vector<std::shared_ptr<Geometry>> geometries;
+
     geometries.push_back(std::shared_ptr<Geometry>(
-        new Sphere(
-            /*center*/ Vec3(0,0,-3), /*radius*/ 1,
+        new InfinitePlane(
+            1, Vec3(0,-1,0),
             std::shared_ptr<Material>(
                 new DiffusionMaterial(
+                 /*texture*/ std::shared_ptr<Texture>(
+                     new PerlinNoiseTexture(
+                        [](const Vec3& co)
+                        {
+                            return 20*co;
+                        },
+                        [](const Vec3& co, float noise)
+                        {
+                            float v = 1*(0.5*(1+cos(5*co.x()+5*noise)));
+                            return Vec3(v,v,v);
+                        }
+                    )
+                )
+            )
+        )
+    )));
+
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-0.5,0,2), /*radius*/ 1,
+            std::shared_ptr<Material>(
+                //new EmissionMaterial(Vec3(1,1,1), 1)
+                /*new DiffusionMaterial(
                     std::shared_ptr<Texture>(
                         new ConstantTexture(Vec3(1,1,1))
+                    )
+                )*/
+                //new ReflectionMaterial(0.9)
+                new RefractionMaterial(0.9, 1.2)
+            )
+        )
+    ));
+
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(1.5,0,2), /*radius*/ 1,
+            std::shared_ptr<Material>(
+                //new EmissionMaterial(Vec3(1,1,1), 1)
+                new DiffusionMaterial(
+                    std::shared_ptr<Texture>(
+                        new ConstantTexture(Vec3(0,1,0.4))
                     )
                 )
             )
         )
     ));
+
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-1.8,0,3), /*radius*/ 1,
+            std::shared_ptr<Material>(
+                //new EmissionMaterial(Vec3(1,1,1), 1)
+                new DiffusionMaterial(
+                    std::shared_ptr<Texture>(
+                        new ConstantTexture(Vec3(0.8,0.5,0.5))
+                    )
+                )
+            )
+        )
+    ));
+
+    //  // rectangle plane lights
+    // {
+    //     std::shared_ptr<TransformGeometry> geometry(
+    //         new Rectangle(
+    //             /*half_width*/ 0.8, /*half_height*/ 0.8,
+    //             /*material*/ std::shared_ptr<Material>(
+    //                 new EmissionMaterial(Vec3(1,1,1), 1)
+    //             )
+    //         ));
+    //     geometry->transform().x = Vec3(1,0,0);
+    //     geometry->transform().y = Vec3(0,0,1);
+    //     geometry->transform().z = Vec3(0,-1,0);
+    //     //geometry->transform().euler(0, 20, 0);
+    //     geometry->transform().t = Vec3(0, 1, 1);
+    //     geometries.push_back(geometry);
+    // }
 
     // generate image using ray tracing
     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
