@@ -678,7 +678,8 @@ class PerlinNoise {
 class Texture
 {
     public:
-        virtual Vec3 value(const Vec3& co, const Vec3& uv) const = 0;
+        virtual Vec3 value(const Vec3& co) const = 0;
+        virtual bool is_uv_texture() const = 0;
 };
 
 class ConstantTexture : public Texture
@@ -688,9 +689,14 @@ class ConstantTexture : public Texture
 
     public:
         ConstantTexture(const Vec3& albedo) : _albedo(albedo) {};
-        Vec3 value(const Vec3& co, const Vec3& uv) const
+        Vec3 value(const Vec3& co) const
         {
             return _albedo;
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
         }
 };
 
@@ -704,11 +710,16 @@ class CheckerBoxTexture: public Texture
     public:
         CheckerBoxTexture(const Vec3& albedo1, const Vec3& albedo2, const Vec3& frequency) : _albedo1(albedo1), _albedo2(albedo2), _frequency(2*M_PI*frequency) {};
 
-        Vec3 value(const Vec3& co, const Vec3& uv) const
+        Vec3 value(const Vec3& co) const
         {
             Vec3 v = _frequency*co;
             bool sign = sin(v.x())*sin(v.y())*sin(v.z()) > 0;
             return sign ? _albedo1 : _albedo2;
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
         }
 };
 
@@ -730,10 +741,15 @@ class PerlinNoiseTexture: public Texture
             _value_transform_fcn = value_fcn;
         }
 
-        Vec3 value(const Vec3& co, const Vec3& uv) const
+        Vec3 value(const Vec3& co) const
         {
             float s = _noise.get(_coord_transform_fcn ? _coord_transform_fcn(co) : co);
             return _value_transform_fcn ? _value_transform_fcn(co, s) : Vec3(s,s,s);
+        }
+
+        bool is_uv_texture() const
+        {
+            return false;
         }
 };
 
@@ -759,11 +775,11 @@ class ImageTexture: public Texture
             _height = _img.size().height;
         }
 
-        Vec3 value(const Vec3& co, const Vec3& uv) const
+        Vec3 value(const Vec3& co) const
         {
             Vec3 value(0,0,0);
             if(check_img_data()) {
-                float u = uv.x(), v = uv.y();
+                float u = co.x(), v = co.y();
                 float x = u*(_width-1);
                 float y = v*(_height-1);
                 int xi = floor(x);
@@ -779,6 +795,11 @@ class ImageTexture: public Texture
             }
             return value;
         }
+
+        bool is_uv_texture() const
+        {
+            return true;
+        }
 };
 
 ///////////////////////////////////////////////////////////////////
@@ -789,9 +810,11 @@ class ImageTexture: public Texture
 class Material
 {
     public:
-        virtual bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) = 0;
+        virtual bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const = 0;
 
-        virtual Vec3 albedo_at(const Vec3& co, const Vec3& uv) = 0;
+        virtual Vec3 albedo_at(const Vec3& co) const = 0;
+
+        virtual bool texture_needs_uv_coords() const { return false; }
 };
 
 class EmissionMaterial : public Material
@@ -805,7 +828,7 @@ class EmissionMaterial : public Material
             _color(color), _intensity(intensity)
         {}
 
-        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
         {
             // no scattering
             out_ray.color = _color*_intensity;
@@ -813,7 +836,7 @@ class EmissionMaterial : public Material
             return true;
         }
 
-        Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        Vec3 albedo_at(const Vec3& co) const
         {
             return Vec3(0,0,0);
         }
@@ -828,7 +851,7 @@ class DiffusionMaterial : public Material
         DiffusionMaterial(const std::shared_ptr<Texture>& albedo) : _albedo(albedo)
         {}
 
-        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
         {
             Vec3 random_dir;
             while(1)
@@ -844,9 +867,14 @@ class DiffusionMaterial : public Material
             return true;
         }
 
-        Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        Vec3 albedo_at(const Vec3& co) const
         {
-            return _albedo->value(co, uv);
+            return _albedo->value(co);
+        }
+
+        bool texture_needs_uv_coords() const
+        {
+            return _albedo->is_uv_texture();
         }
 };
 
@@ -861,7 +889,7 @@ class ReflectionMaterial : public Material
             _specularity(specularity), _perturb_normal(_perturb_normal)
         {}
 
-        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
         {
             Vec3 reflection_dir;
             if(_perturb_normal) // perturb reflection through perturbing normal
@@ -885,7 +913,7 @@ class ReflectionMaterial : public Material
             else return false;
         }
 
-        inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        inline Vec3 albedo_at(const Vec3& co) const
         {
             return Vec3(0,0,0);
         }
@@ -901,7 +929,7 @@ class RefractionMaterial : public Material
             _specularity(specularity), _IOR(IOR)
         {}
 
-        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+        inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
         {
             // incident_dir and normal must be unit vector!
             Vec3 perturbed_normal = (interception_point_normal + random_in_unit_sphere()*(1-_specularity)).normalized();
@@ -933,7 +961,7 @@ class RefractionMaterial : public Material
             }
         }
 
-        inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+        inline Vec3 albedo_at(const Vec3& co) const
         {
             return Vec3(0,0,0);
         }
@@ -973,7 +1001,7 @@ class CombinedMaterial : public Material
                     _refraction_weight = 0;
             }
 
-            inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+            inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
             {
                 float pick_diffusion_prob = _diffusion_weight/(_diffusion_weight+_reflection_weight+_refraction_weight);
                 std::shared_ptr<Material> picked_material;
@@ -990,12 +1018,19 @@ class CombinedMaterial : public Material
                 return picked_material->scatter(in_ray, interception_point, interception_point_normal, interception_point_albedo, out_ray);
             }
 
-            inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+            inline Vec3 albedo_at(const Vec3& co) const
             {
                 if(_diffusion_material != nullptr)
-                    return _diffusion_material->albedo_at(co, uv);
+                    return _diffusion_material->albedo_at(co);
                 else
                     return Vec3(0,0,0);
+            }
+
+            bool texture_needs_uv_coords() const
+            {
+                if(_diffusion_material != nullptr)
+                    return _diffusion_material->texture_needs_uv_coords();
+                return false;
             }
 };
 
@@ -1040,8 +1075,13 @@ class Geometry
 
         inline Vec3 texture_at(const Vec3& co) const
         {
-            Vec3 uv = map_to_uv_texture_space(co);
-            return _material->albedo_at(co, uv);
+            if(_material->texture_needs_uv_coords())
+            {
+                Vec3 uv = map_to_uv_texture_space(co);
+                return _material->albedo_at(uv);
+            }
+            else
+                return _material->albedo_at(co);
         }
 
         virtual bool interception_with_ray(const Ray& ray, float& interception_distance, Vec3& interception_point, Vec3& normal)
@@ -2519,12 +2559,15 @@ void test_scene(const Parameters& params)
         new Sphere(
             /*center*/ Vec3(-0.5,0,2), /*radius*/ 1,
             std::shared_ptr<Material>(
+                // new DiffusionMaterial(
+                //     std::shared_ptr<Texture>(new ImageTexture("earth_texture_map_1000px.jpg"))
+                // )
                 new CombinedMaterial(
-                    /*diffusion_weight*/    0.1,
+                    /*diffusion_weight*/    0.2,
                     /*diffusion_material*/  std::shared_ptr<Material>(
                         new DiffusionMaterial(
                             std::shared_ptr<Texture>(
-                                new ConstantTexture(Vec3(0,0,1))))),
+                                new ImageTexture("earth_texture_map_1000px.jpg")))),
                     /*reflection_weight*/   0.5,
                     /*reflection_material*/ std::shared_ptr<Material>(
                         new ReflectionMaterial(1)),
