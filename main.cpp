@@ -939,6 +939,66 @@ class RefractionMaterial : public Material
         }
 };
 
+class CombinedMaterial : public Material
+{
+    private:
+        std::shared_ptr<Material> _diffusion_material;
+        std::shared_ptr<Material> _reflection_material;
+        std::shared_ptr<Material> _refraction_material;
+
+        float _diffusion_weight, _reflection_weight, _refraction_weight;
+
+    public:
+        CombinedMaterial(
+            float diffusion_weight,
+            const std::shared_ptr<Material>& diffusion_material,
+            float reflection_weight = 0.0f,
+            const std::shared_ptr<Material>& reflection_material = nullptr,
+            float refraction_weight = 0.0f,
+            const std::shared_ptr<Material>& refraction_material = nullptr
+            ) :
+            _diffusion_material(diffusion_material),
+            _reflection_material(reflection_material),
+            _refraction_material(refraction_material)
+            {
+                _diffusion_weight = diffusion_weight;
+                _reflection_weight = reflection_weight;
+                _refraction_weight = refraction_weight;
+
+                if(_diffusion_material == nullptr)
+                    _diffusion_weight = 0;
+                if(_reflection_material == nullptr)
+                    _reflection_weight = 0;
+                if(_refraction_material == nullptr)
+                    _refraction_weight = 0;
+            }
+
+            inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray)
+            {
+                float pick_diffusion_prob = _diffusion_weight/(_diffusion_weight+_reflection_weight+_refraction_weight);
+                std::shared_ptr<Material> picked_material;
+                if(random_uniform() < pick_diffusion_prob)
+                    picked_material = _diffusion_material;
+                else
+                {
+                    float pick_reflection_prob = _reflection_weight/(_reflection_weight+_refraction_weight);
+                    if(random_uniform() < pick_reflection_prob)
+                        picked_material = _reflection_material;
+                    else
+                        picked_material = _refraction_material;
+                }
+                return picked_material->scatter(in_ray, interception_point, interception_point_normal, interception_point_albedo, out_ray);
+            }
+
+            inline Vec3 albedo_at(const Vec3& co, const Vec3& uv)
+            {
+                if(_diffusion_material != nullptr)
+                    return _diffusion_material->albedo_at(co, uv);
+                else
+                    return Vec3(0,0,0);
+            }
+};
+
 ///////////////////////////////////////////////////////////////////
 //
 // Geometry
@@ -2459,14 +2519,19 @@ void test_scene(const Parameters& params)
         new Sphere(
             /*center*/ Vec3(-0.5,0,2), /*radius*/ 1,
             std::shared_ptr<Material>(
-                //new EmissionMaterial(Vec3(1,1,1), 1)
-                /*new DiffusionMaterial(
-                    std::shared_ptr<Texture>(
-                        new ConstantTexture(Vec3(1,1,1))
-                    )
-                )*/
-                //new ReflectionMaterial(0.9)
-                new RefractionMaterial(0.9, 1.2)
+                new CombinedMaterial(
+                    /*diffusion_weight*/    0.1,
+                    /*diffusion_material*/  std::shared_ptr<Material>(
+                        new DiffusionMaterial(
+                            std::shared_ptr<Texture>(
+                                new ConstantTexture(Vec3(0,0,1))))),
+                    /*reflection_weight*/   0.5,
+                    /*reflection_material*/ std::shared_ptr<Material>(
+                        new ReflectionMaterial(1)),
+                    /*refraction_weight*/   0.5,
+                    /*refraction_material*/ std::shared_ptr<Material>(
+                        new RefractionMaterial(1, 1.2))
+                )
             )
         )
     ));
