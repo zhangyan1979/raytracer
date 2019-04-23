@@ -1009,7 +1009,7 @@ class CombinedMaterial : public Material
             inline bool scatter(const Ray& in_ray, const Vec3& interception_point, const Vec3& interception_point_normal, const Vec3& interception_point_albedo, Ray& out_ray) const
             {
                 float pick_diffusion_prob = _diffusion_weight/(_diffusion_weight+_reflection_weight+_refraction_weight);
-                std::shared_ptr<Material> picked_material;
+                std::shared_ptr<Material> picked_material = nullptr;
                 if(random_uniform() < pick_diffusion_prob)
                     picked_material = _diffusion_material;
                 else
@@ -1020,7 +1020,11 @@ class CombinedMaterial : public Material
                     else
                         picked_material = _refraction_material;
                 }
-                return picked_material->scatter(in_ray, interception_point, interception_point_normal, interception_point_albedo, out_ray);
+
+                if(picked_material)
+                    return picked_material->scatter(in_ray, interception_point, interception_point_normal, interception_point_albedo, out_ray);
+                else
+                    return false;
             }
 
             inline Vec3 albedo_at(const Vec3& co) const
@@ -2516,37 +2520,38 @@ void test_scene8(const Parameters& params)
         new InfinitePlane(
             1, Vec3(0,-1,0),
             std::shared_ptr<Material>(
-                new DiffusionMaterial(
-                 /*texture*/ std::shared_ptr<Texture>(
-                     new PerlinNoiseTexture(
-                        [](const Vec3& co)
-                        {
-                            return 20*co;
-                        },
-                        [](const Vec3& co, float noise)
-                        {
-                            float v = 1*(0.5*(1+cos(5*co.x()+5*noise)));
-                            return Vec3(v,v,v);
-                        }
-                    )
-                )
-            )
-        )
-    )));
+                new CombinedMaterial(
+                    /*diffusion_weight*/ 0.5f,
+                    /*diffusion_material*/ std::shared_ptr<DiffusionMaterial>(new DiffusionMaterial(
+                        std::shared_ptr<Texture>(
+                        new PerlinNoiseTexture(
+                            [](const Vec3& co)
+                            {
+                                return 20*co;
+                            },
+                            [](const Vec3& co, float noise)
+                            {
+                                float v = 1*(0.5*(1+cos(5*co.x()+5*noise)));
+                                return Vec3(v,v,v);
+                            }
+                        )))),
+                    /*reflection_weight*/ 0.5f,
+                    std::shared_ptr<ReflectionMaterial>(new ReflectionMaterial(0.9)))
+                ))));
 
     geometries.push_back(std::shared_ptr<Geometry>(
         new Sphere(
             /*center*/ Vec3(-0.5,0,2), /*radius*/ 1,
             std::shared_ptr<Material>(
                 new CombinedMaterial(
-                    /*diffusion_weight*/    0.2,
+                    /*diffusion_weight*/    0.5,
                     /*diffusion_material*/  std::shared_ptr<DiffusionMaterial>(
                         new DiffusionMaterial(
                             std::shared_ptr<Texture>(
                                 new ImageTexture("earth_texture_map_1000px.jpg")))),
-                    /*reflection_weight*/   0.5,
+                    /*reflection_weight*/   0.2,
                     /*reflection_material*/ std::shared_ptr<ReflectionMaterial>(
-                        new ReflectionMaterial(1)),
+                        new ReflectionMaterial(0.8)),
                     /*refraction_weight*/   0.5,
                     /*refraction_material*/ std::shared_ptr<RefractionMaterial>(
                         new RefractionMaterial(1, 1.2))
@@ -2560,11 +2565,12 @@ void test_scene8(const Parameters& params)
             /*center*/ Vec3(1.5,0,2), /*radius*/ 1,
             std::shared_ptr<Material>(
                 //new EmissionMaterial(Vec3(1,1,1), 1)
-                new DiffusionMaterial(
+                /*new DiffusionMaterial(
                     std::shared_ptr<Texture>(
                         new ConstantTexture(Vec3(0,1,0.4))
                     )
-                )
+                )*/
+                new ReflectionMaterial(0.9)
             )
         )
     ));
@@ -2587,7 +2593,7 @@ void test_scene8(const Parameters& params)
     {
         std::shared_ptr<TransformGeometry> geometry(
             new Rectangle(
-                /*half_width*/ 1, /*half_height*/ 1,
+                /*half_width*/ 2, /*half_height*/ 2,
                 /*material*/ std::shared_ptr<Material>(
                     new EmissionMaterial(Vec3(1,1,1), 4)
                 )
@@ -2596,7 +2602,22 @@ void test_scene8(const Parameters& params)
         geometry->transform().y = Vec3(0,0,1);
         geometry->transform().z = Vec3(0,-1,0);
         //geometry->transform().euler(0, 20, 0);
-        geometry->transform().t = Vec3(0, -2, 1);
+        geometry->transform().t = Vec3(0, -3, 2);
+        geometries.push_back(geometry);
+    }
+    {
+        std::shared_ptr<TransformGeometry> geometry(
+            new Rectangle(
+                /*half_width*/ 1, /*half_height*/ 1,
+                /*material*/ std::shared_ptr<Material>(
+                    new EmissionMaterial(Vec3(0.5,1,0.5), 2)
+                )
+            ));
+        geometry->transform().x = Vec3(1,0,0);
+        geometry->transform().y = Vec3(0,1,0);
+        geometry->transform().z = Vec3(0,0,1);
+        //geometry->transform().euler(0, 20, 0);
+        geometry->transform().t = Vec3(0, 0, -1);
         geometries.push_back(geometry);
     }
 
@@ -2616,7 +2637,7 @@ int main(int argc, char* argv[])
     Parameters params = parse_params(argc, argv);
 
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene7(params);
+    test_scene8(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
