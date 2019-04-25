@@ -1814,131 +1814,128 @@ void save_img(const std::string& fn, const cv::Mat& img)
     }
 }
 
-// // Scene: tons of small balls (including ones emitting lights) scattered around.
-// void test_scene2(const Parameters& params)
-// {
-//     // parameters
-//     int S = params.S;
-//     int num_samples = params.num_samples;
-//     int num_threads = params.num_threads;
-//     int max_num_bounces = params.max_num_bounces;
+// Scene: tons of small balls (including ones emitting lights) scattered around.
+void test_scene2(const Parameters& params)
+{
+    // parameters
+    int S = params.S;
+    int num_samples = params.num_samples;
+    int num_threads = params.num_threads;
+    int max_num_bounces = params.max_num_bounces;
 
-//     Vec3 ambient_color(0.2, 0.2, 0.2);
+    Vec3 ambient_color(0.2, 0.2, 0.2);
 
-//     // camera
-//     size_t W = 30*S, H = 20*S;
-//     Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
+    // camera
+    size_t W = 30*S, H = 20*S;
+    Camera camera(Vec3(0,-0.8,0), Vec3(0,0.4,1), Vec3(0,1,0), 10, 32, W, H, true);
 
-//     // lights
-//     std::vector<std::shared_ptr<Light>> lights;
-//     // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
-//     // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
-//     // lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
+    // lights
+    std::vector<std::shared_ptr<Light>> lights;
+    // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(-2,-4,3))));
+    // lights.push_back(std::shared_ptr<Light>(new SpotLight(Vec3(1,1,1), 100, Vec3(2,-4,3))));
+    // lights.push_back(std::shared_ptr<Light>(new SunLight(Vec3(1,1,1), 0.8, Vec3(0,1,0))));
 
-//     // geometries
-//     std::vector<std::shared_ptr<Geometry>> geometries;
-//     geometries.push_back(std::shared_ptr<Geometry>(
-//         new InfinitePlane(
-//             /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
-//             /*material*/ std::shared_ptr<Material>(new Material
-//             (
-//                 /*is_emitter*/              false,
-//                 /*diffusion_factor*/        0.1,
-//                 /*reflection_factor*/       0.9,
-//                 /*refraction_factor*/       0,
-//                 /*reflection_specularity*/  0.5,
-//                 /*refraction_specularity*/  0,
-//                 /*index_of_refraction*/     1
-//             )),
-//             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))))
-//         ));
-//     geometries.push_back(std::shared_ptr<Geometry>(
-//         new Sphere(
-//             /*center*/Vec3(1.2,0,2), /*radius*/ 1.0,
-//             /*material*/ std::shared_ptr<Material>(new Material
-//             (
-//                 /*is_emitter*/              false,
-//                 /*diffusion_factor*/        0.1,
-//                 /*reflection_factor*/       0.9,
-//                 /*refraction_factor*/       0,
-//                 /*reflection_specularity*/  0.5,
-//                 /*refraction_specularity*/  0,
-//                 /*index_of_refraction*/     1
-//             )),
-//             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0.6,0))))
-//         ));
-//     geometries.push_back(std::shared_ptr<Geometry>(
-//         new Sphere(
-//             /*center*/ Vec3(0,0,3), /*radius*/ 1.0,
-//             /*material*/ std::shared_ptr<Material>(new Material
-//             (
-//                 /*is_emitter*/              false,
-//                 /*diffusion_factor*/        0.2,
-//                 /*reflection_factor*/       0.8,
-//                 /*refraction_factor*/       0,
-//                 /*reflection_specularity*/  1.0,
-//                 /*refraction_specularity*/  0,
-//                 /*index_of_refraction*/     1
-//             )),
-//             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))
-//         ));
-//     geometries.push_back(std::shared_ptr<Geometry>(
-//         new Sphere(
-//             /*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0,
-//             /*material*/ std::shared_ptr<Material>(new Material
-//             (
-//                 /*is_emitter*/              true,
-//                 /*diffusion_factor*/        0.9,
-//                 /*reflection_factor*/       0.1,
-//                 /*refraction_factor*/       0,
-//                 /*reflection_specularity*/  0.4,
-//                 /*refraction_specularity*/  0,
-//                 /*index_of_refraction*/     1
-//             )),
-//             /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))))
-//         ));
+    // geometries
+    std::vector<std::shared_ptr<Geometry>> geometries;
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new InfinitePlane(
+            /*distnace*/ 1, /*normal*/ Vec3(0,-1,0),
+            /*material*/ std::shared_ptr<Material>(new CombinedMaterial(
+                /*diffusion_weight*/ 0.1,
+                /*diffusion_material*/ std::shared_ptr<DiffusionMaterial>(new DiffusionMaterial(
+                    std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.5,0.5,0.8))))),
+                /*reflection_weight*/ 0.9,
+                /*reflection_material*/ std::shared_ptr<ReflectionMaterial>(new ReflectionMaterial(0.5))
+            )))));
 
-//     int num_small_balls = 400;
-//     float small_ball_radius = 0.25;
-//     float distribute_range = 12;
-//     for(int i = 0; i < num_small_balls;) {
-//         std::shared_ptr<Sphere> small_ball(
-//             new Sphere(
-//                 /*center*/ Vec3(
-//                     random_uniform(-distribute_range, distribute_range),
-//                     1-small_ball_radius,
-//                     random_uniform(-distribute_range, distribute_range)),
-//                 /*radius*/ small_ball_radius,
-//                 /*material*/ std::shared_ptr<Material>(new Material
-//                 (
-//                     /*is_emitter*/              random_uniform() > 0.8,
-//                     /*diffusion_factor*/        random_uniform(0.1, 1),
-//                     /*reflection_factor*/       random_uniform(0.1, 1),
-//                     /*refraction_factor*/       0,
-//                     /*reflection_specularity*/  random_uniform(0.1, 1),
-//                     /*refraction_specularity*/  0,
-//                     /*index_of_refraction*/     1
-//                 )),
-//                 /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
-//                     Vec3(
-//                     random_uniform(),
-//                     random_uniform(),
-//                     random_uniform()
-//                     )))
-//             ));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/Vec3(1.2,0,2), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new EmissionMaterial(Vec3(0.6,0.6,0),1)))));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(0,0,3), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new CombinedMaterial
+            (
+                /*diffusion_weight*/ 0.2,
+                /*diffusion_material*/ std::shared_ptr<DiffusionMaterial>(new DiffusionMaterial(
+                    std::shared_ptr<Texture>(new ConstantTexture(Vec3(0.6,0,0))))),
+                /*reflection_weight*/ 0.8,
+                /*reflection_material*/ std::shared_ptr<ReflectionMaterial>(new ReflectionMaterial(1.0))
+            )))));
+    geometries.push_back(std::shared_ptr<Geometry>(
+        new Sphere(
+            /*center*/ Vec3(-1.2,0,4), /*radius*/ 1.0,
+            /*material*/ std::shared_ptr<Material>(new CombinedMaterial
+            (
+                /*diffusion_weight*/ 0.9,
+                /*diffusion_material*/ std::shared_ptr<DiffusionMaterial>(new DiffusionMaterial(
+                    std::shared_ptr<Texture>(new ConstantTexture(Vec3(0,0.8,0))))),
+                /*reflection_weight*/ 0.1,
+                /*reflection_material*/ std::shared_ptr<ReflectionMaterial>(new ReflectionMaterial(0.4))
+            )))));
+    int num_small_balls = 400;
+    float small_ball_radius = 0.25;
+    float distribute_range = 12;
+    for(int i = 0; i < num_small_balls;) {
+        std::shared_ptr<Material> material;
+        if(random_uniform() < 0.6)
+            material = std::shared_ptr<Material>(new CombinedMaterial
+                    (
+                    /*diffusion_weight*/ random_uniform(0.1, 1),
+                    /*diffusion_material*/
+                    std::shared_ptr<DiffusionMaterial>(new DiffusionMaterial(
+                        std::shared_ptr<Texture>(new ConstantTexture(Vec3(
+                        random_uniform(),
+                        random_uniform(),
+                        random_uniform()
+                        ))))),
+                    /*reflection_weight*/ random_uniform(0.1, 1),
+                    /*reflection_material*/ std::shared_ptr<ReflectionMaterial>(new ReflectionMaterial(random_uniform(0.1, 1)))));
+        else material = std::shared_ptr<Material>(new EmissionMaterial(Vec3(
+            random_uniform(),
+            random_uniform(),
+            random_uniform()
+            ), 1));
 
-//         if(!spheres_have_interceptions(small_ball, geometries))
-//         {
-//             geometries.push_back(small_ball);
-//             i++;
-//         }
-//     }
+        std::shared_ptr<Sphere> small_ball(
+            new Sphere(
+                /*center*/ Vec3(
+                    random_uniform(-distribute_range, distribute_range),
+                    1-small_ball_radius,
+                    random_uniform(-distribute_range, distribute_range)),
+                /*radius*/ small_ball_radius,
+                /*material*/ material));
 
-//     // generate image using ray tracing
-//     cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+            //     (
+            //         /*is_emitter*/              random_uniform() > 0.8,
+            //         /*diffusion_factor*/        random_uniform(0.1, 1),
+            //         /*reflection_factor*/       random_uniform(0.1, 1),
+            //         /*refraction_factor*/       0,
+            //         /*reflection_specularity*/  random_uniform(0.1, 1),
+            //         /*refraction_specularity*/  0,
+            //         /*index_of_refraction*/     1
+            //     )),
+            //     /*texture*/ std::shared_ptr<Texture>(new ConstantTexture(
+            //         Vec3(
+            //         random_uniform(),
+            //         random_uniform(),
+            //         random_uniform()
+            //         )))
+            // ));
 
-//     save_img("test", img);
-// }
+        if(!spheres_have_interceptions(small_ball, geometries))
+        {
+            geometries.push_back(small_ball);
+            i++;
+        }
+    }
+
+    // generate image using ray tracing
+    cv::Mat img = generate_image2(H, W, num_threads, max_num_bounces, num_samples, camera, geometries, lights, ambient_color);
+
+    save_img("test", img);
+}
 
 // // Scene: rectangle light source with a sphere.
 // void test_scene3(const Parameters& params)
@@ -2637,7 +2634,7 @@ int main(int argc, char* argv[])
     Parameters params = parse_params(argc, argv);
 
     auto t_start = std::chrono::high_resolution_clock::now();
-    test_scene8(params);
+    test_scene2(params);
     auto t_end = std::chrono::high_resolution_clock::now();
     std::cout << "Elpased time (seconds) = " << std::chrono::duration_cast<std::chrono::seconds>(t_end-t_start).count() << std::endl;
     return 0;
